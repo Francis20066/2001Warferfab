@@ -14,7 +14,11 @@ if errorlevel 1 exit /b 1
 "%MASM32%\bin\link.exe" /SUBSYSTEM:WINDOWS /nologo main.obj
 if errorlevel 1 exit /b 1
 
-if exist WaferFab.exe del WaferFab.exe
-ren main.exe WaferFab.exe
+if not exist build (
+  mkdir build
+)
+move main.exe build\main.exe
+if exist build\WaferFab.exe del build\WaferFab.exe
+ren build\main.exe build\WaferFab.exe
 del main.obj
 echo Built WaferFab.exe
