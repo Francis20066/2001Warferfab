@@ -1,4 +1,9 @@
 
+from pathlib import Path
+
+Path("utils/input.txt").touch(exist_ok=True)
+Path("utils/output.txt").touch(exist_ok=True)
+
 text = ""
 parses:list[str] = []
 result:list[str] = []
