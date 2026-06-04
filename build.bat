@@ -17,8 +17,9 @@ if errorlevel 1 exit /b 1
 if not exist build (
   mkdir build
 )
-move main.exe build\main.exe
-if exist build\WaferFab.exe del build\WaferFab.exe
-ren build\main.exe build\WaferFab.exe
+
+move main.exe build/main.exe
+if exist build/WaferFab.exe del build/WaferFab.exe
+ren build/main.exe WaferFab.exe
 del main.obj
 echo Built WaferFab.exe
