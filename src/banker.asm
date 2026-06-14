@@ -40,8 +40,6 @@ TryAdmitOrder PROC USES ebx esi edi orderIndex:DWORD
     mov esi, orderIndex
     movzx eax, BYTE PTR [OrderState+esi]
     mov prevState, eax
-    cmp QueueCount, QUEUE_SIZE
-    jae deny_admit
     mov ebx, esi
     lea ebx, [ebx+ebx*2]
 
@@ -121,7 +119,6 @@ BankerSafe PROC USES ebx esi edi
     LOCAL work0:DWORD
     LOCAL work1:DWORD
     LOCAL work2:DWORD
-    LOCAL finishMask:DWORD
     LOCAL progress:DWORD
     LOCAL doneCount:DWORD
 
@@ -131,25 +128,28 @@ BankerSafe PROC USES ebx esi edi
     mov work1, eax
     movzx eax, BYTE PTR [ResAvail+2]
     mov work2, eax
-    mov finishMask, 0
+    mov esi, 0
+clear_safe_finish:
+    cmp esi, OrderCount
+    jae clear_safe_done
+    mov BYTE PTR [SafeFinish+esi], 0
+    inc esi
+    jmp clear_safe_finish
+clear_safe_done:
 
 safe_outer:
     mov progress, 0
     mov doneCount, 0
     mov esi, 0
 safe_each:
-    cmp esi, ORDER_COUNT
+    cmp esi, OrderCount
     jae safe_pass_done
-    mov eax, 1
-    mov ecx, esi
-    shl eax, cl
-    mov edi, eax
-    test finishMask, eax
+    cmp BYTE PTR [SafeFinish+esi], 0
     jne already_finish
 
     movzx eax, BYTE PTR [OrderState+esi]
     .if eax == STATE_DONE || eax == STATE_NEW || eax == STATE_WAIT
-        or finishMask, edi
+        mov BYTE PTR [SafeFinish+esi], 1
         inc progress
         jmp already_finish
     .endif
@@ -178,7 +178,7 @@ safe_each:
     add work1, eax
     movzx eax, BYTE PTR [OrderAlloc+ebx+2]
     add work2, eax
-    or finishMask, edi
+    mov BYTE PTR [SafeFinish+esi], 1
     inc progress
     jmp already_finish
 cannot_finish:
@@ -188,19 +188,17 @@ already_finish:
 safe_pass_done:
     mov esi, 0
 count_finish:
-    cmp esi, ORDER_COUNT
+    cmp esi, OrderCount
     jae counted
-    mov eax, 1
-    mov ecx, esi
-    shl eax, cl
-    test finishMask, eax
+    cmp BYTE PTR [SafeFinish+esi], 0
     jz not_counted
     inc doneCount
 not_counted:
     inc esi
     jmp count_finish
 counted:
-    cmp doneCount, ORDER_COUNT
+    mov eax, OrderCount
+    cmp doneCount, eax
     je safe_yes
     cmp progress, 0
     jne safe_outer

@@ -136,7 +136,7 @@ PaintUI PROC USES ebx esi edi hWnd:HWND, hdc:HDC
     mov textLeft, 22
     mov textTop, 24
     mov eax, w
-    sub eax, 320
+    sub eax, 250
     mov textRight, eax
     mov textBottom, 62
     invoke DrawCellW, hdc, ADDR TitleText, textLeft, textTop, textRight, textBottom
@@ -148,13 +148,20 @@ PaintUI PROC USES ebx esi edi hWnd:HWND, hdc:HDC
     movzx edx, sysTime.wMinute
     movzx esi, sysTime.wSecond
     invoke wsprintfA, ADDR TimeBuffer, ADDR FmtTime, eax, ebx, ecx, edx, esi
+    invoke SelectObject, hdc, hSmallFont
     mov eax, w
-    sub eax, 292
+    sub eax, 230
+    cmp eax, 22
+    jge time_left_ok
+    mov eax, 22
+time_left_ok:
     mov textLeft, eax
     mov eax, w
     sub eax, 20
     mov textRight, eax
-    invoke DrawCellA, hdc, ADDR TimeBuffer, textLeft, 26, textRight, 62
+    invoke SetRect, ADDR rc, textLeft, 26, textRight, 62
+    invoke DrawTextA, hdc, ADDR TimeBuffer, -1, ADDR rc, \
+        DT_RIGHT or DT_VCENTER or DT_SINGLELINE or DT_END_ELLIPSIS
 
     invoke SelectObject, hdc, hSmallFont
 
@@ -193,11 +200,11 @@ PaintUI ENDP
 ; Preserves:
 ;   EBX, ESI, EDI
 ; Side effects:
-;   创建并行度 checkbox 组，默认选中 1。
+;   创建并行度 radio button 组，默认选中 1。
 ; ------------------------------------------------------------
 CreateParallelControls PROC USES ebx esi hWnd:HWND
     invoke CreateWindowExW, 0, ADDR StaticClassW, ADDR ParallelLabelW, \
-        WS_CHILD or WS_VISIBLE, 0, 0, 70, 22, hWnd, CTRL_PARALLEL_LABEL, hInstance, NULL
+        WS_CHILD, 0, 0, 82, 22, hWnd, CTRL_PARALLEL_LABEL, hInstance, NULL
     mov hParallelLabel, eax
 
     mov esi, 0
@@ -208,13 +215,23 @@ create_parallel_loop:
     mov ebx, CTRL_PARALLEL_1
     add ebx, esi
     invoke CreateWindowExW, 0, ADDR ButtonClassW, eax, \
-        WS_CHILD or WS_VISIBLE or BS_AUTOCHECKBOX, 0, 0, 28, 22, hWnd, ebx, hInstance, NULL
+        WS_CHILD or BS_AUTORADIOBUTTON, 0, 0, 38, 22, hWnd, ebx, hInstance, NULL
     mov [hParallelBtns+esi*4], eax
     inc esi
     jmp create_parallel_loop
 create_parallel_done:
     invoke CheckRadioButton, hWnd, CTRL_PARALLEL_1, CTRL_PARALLEL_5, CTRL_PARALLEL_1
     invoke LayoutParallelControls, hWnd
+    invoke ShowWindow, hParallelLabel, SW_SHOW
+    mov esi, 0
+show_parallel_loop:
+    cmp esi, MAX_PARALLEL
+    jae show_parallel_done
+    mov eax, [hParallelBtns+esi*4]
+    invoke ShowWindow, eax, SW_SHOW
+    inc esi
+    jmp show_parallel_loop
+show_parallel_done:
     ret
 CreateParallelControls ENDP
 
@@ -233,6 +250,13 @@ CreateParallelControls ENDP
 ; ------------------------------------------------------------
 LayoutParallelControls PROC USES esi hWnd:HWND
     LOCAL rc:RECT
+    LOCAL w:DWORD
+    LOCAL h:DWORD
+    LOCAL row4Top:DWORD
+    LOCAL row2Bottom:DWORD
+    LOCAL row3Top:DWORD
+    LOCAL midX:DWORD
+    LOCAL remain:DWORD
     LOCAL x:DWORD
     LOCAL y:DWORD
 
@@ -241,23 +265,60 @@ LayoutParallelControls PROC USES esi hWnd:HWND
 
     invoke GetClientRect, hWnd, ADDR rc
     mov eax, rc.right
-    sub eax, 520
-    cmp eax, 300
+    sub eax, rc.left
+    mov w, eax
+    mov eax, rc.bottom
+    sub eax, rc.top
+    mov h, eax
+
+    cmp eax, 260
+    jae parallel_calc_rows
+    mov row3Top, 170
+    jmp parallel_rows_done
+parallel_calc_rows:
+    mov eax, h
+    sub eax, 120
+    mov row4Top, eax
+    mov eax, row4Top
+    sub eax, 70
+    sub eax, 20
+    mov remain, eax
+    mov eax, remain
+    mov ecx, 45
+    mul ecx
+    mov ecx, 100
+    div ecx
+    add eax, 70
+    add eax, 10
+    mov row2Bottom, eax
+    add eax, 10
+    mov row3Top, eax
+parallel_rows_done:
+
+    mov eax, w
+    sub eax, 34
+    shr eax, 1
+    add eax, 12
+    mov midX, eax
+    sub eax, 294
+    cmp eax, 22
     jge have_parallel_x
-    mov eax, 300
+    mov eax, 22
 have_parallel_x:
     mov x, eax
-    mov y, 28
+    mov eax, row3Top
+    add eax, 2
+    mov y, eax
 
-    invoke MoveWindow, hParallelLabel, x, y, 72, 22, TRUE
-    add x, 74
+    invoke MoveWindow, hParallelLabel, x, y, 82, 22, TRUE
+    add x, 84
     mov esi, 0
 layout_btn_loop:
     cmp esi, MAX_PARALLEL
     jae layout_parallel_done
     mov eax, [hParallelBtns+esi*4]
-    invoke MoveWindow, eax, x, y, 30, 22, TRUE
-    add x, 32
+    invoke MoveWindow, eax, x, y, 38, 22, TRUE
+    add x, 40
     inc esi
     jmp layout_btn_loop
 layout_parallel_done:
@@ -275,19 +336,19 @@ LayoutParallelControls ENDP
 ; Preserves:
 ;   EBX, ESI, EDI
 ; Side effects:
-;   创建订单分页标签和上一页/下一页按钮。
+;   创建订单列表上一页/下一页按钮；页码由 DrawOrderTable 绘制。
 ; ------------------------------------------------------------
 CreateOrderPageControls PROC hWnd:HWND
-    invoke CreateWindowExW, 0, ADDR StaticClassW, ADDR OrderPageLabelW, \
-        WS_CHILD or WS_VISIBLE, 0, 0, 70, 22, hWnd, NULL, hInstance, NULL
-    mov hOrderPageLabel, eax
+    mov hOrderPageLabel, 0
     invoke CreateWindowExW, 0, ADDR ButtonClassW, ADDR PrevPageW, \
-        WS_CHILD or WS_VISIBLE, 0, 0, 28, 22, hWnd, CTRL_ORDER_PREV, hInstance, NULL
+        WS_CHILD or BS_PUSHBUTTON, 0, 0, 28, 22, hWnd, CTRL_ORDER_PREV, hInstance, NULL
     mov hOrderPrevBtn, eax
     invoke CreateWindowExW, 0, ADDR ButtonClassW, ADDR NextPageW, \
-        WS_CHILD or WS_VISIBLE, 0, 0, 28, 22, hWnd, CTRL_ORDER_NEXT, hInstance, NULL
+        WS_CHILD or BS_PUSHBUTTON, 0, 0, 28, 22, hWnd, CTRL_ORDER_NEXT, hInstance, NULL
     mov hOrderNextBtn, eax
     invoke LayoutOrderPageControls, hWnd
+    invoke ShowWindow, hOrderPrevBtn, SW_SHOW
+    invoke ShowWindow, hOrderNextBtn, SW_SHOW
     ret
 CreateOrderPageControls ENDP
 
@@ -302,31 +363,33 @@ CreateOrderPageControls ENDP
 ; Preserves:
 ;   EBX, ESI, EDI
 ; Side effects:
-;   根据窗口宽度移动订单分页控件。
+;   根据窗口宽度移动订单分页按钮到订单面板标题栏右侧。
 ; ------------------------------------------------------------
-LayoutOrderPageControls PROC hWnd:HWND
+LayoutOrderPageControls PROC USES ebx hWnd:HWND
     LOCAL rc:RECT
     LOCAL x:DWORD
     LOCAL y:DWORD
 
-    cmp hOrderPageLabel, 0
+    cmp hOrderPrevBtn, 0
     je layout_order_page_done
 
     invoke GetClientRect, hWnd, ADDR rc
     mov eax, rc.right
-    sub eax, 190
-    cmp eax, 22
+    sub eax, 34
+    shr eax, 1
+    add eax, 12
+    sub eax, 68
+    cmp eax, 120
     jge have_order_page_x
-    mov eax, 22
+    mov eax, 120
 have_order_page_x:
     mov x, eax
-    mov y, 52
+    mov y, 82
 
-    invoke MoveWindow, hOrderPageLabel, x, y, 74, 22, TRUE
-    add x, 76
     invoke MoveWindow, hOrderPrevBtn, x, y, 28, 22, TRUE
-    add x, 30
-    invoke MoveWindow, hOrderNextBtn, x, y, 28, 22, TRUE
+    mov eax, x
+    add eax, 30
+    invoke MoveWindow, hOrderNextBtn, eax, y, 28, 22, TRUE
 layout_order_page_done:
     ret
 LayoutOrderPageControls ENDP
@@ -558,7 +621,7 @@ AddLogEvent PROC USES ebx esi edi eventText:DWORD, orderIndex:DWORD
     add edi, eax
 
     mov eax, orderIndex
-    cmp eax, ORDER_COUNT
+    cmp eax, OrderCount
     jb log_has_order
     mov esi, OFFSET DashTextA
     jmp log_format

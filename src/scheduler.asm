@@ -25,23 +25,25 @@
 ;   hdc             = 绘制目标
 ;   lft,tp,rgt,btm = 调度面板矩形
 ; Output:
-;   无；绘制当前运行订单、就绪队列前三项，以及示意性时间轴色块
+;   无；绘制最近 60 秒内各订单的 READY/RUN 时间轴
 ; Clobbers:
 ;   EAX, ECX, EDX
 ; Preserves:
 ;   EBX, ESI, EDI
 ; Side effects:
-;   读取 CurrentOrder/ReadyQueue/QueueHead/QueueCount；临时创建画刷。
+;   读取 SchedHistory/OrderIdPtrs/OrderCount；临时创建画刷。
 ; Notes:
-;   时间轴色块是固定比例演示，不是根据真实历史日志动态生成。
+;   横轴固定为最近 60 秒，越靠右越接近当前 tick；纵轴为订单号。
 ; ------------------------------------------------------------
 DrawSchedule PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:DWORD
     LOCAL gridL:DWORD
     LOCAL gridT:DWORD
     LOCAL gridR:DWORD
     LOCAL gridB:DWORD
+    LOCAL gridW:DWORD
     LOCAL rowH:DWORD
-    LOCAL hBrush:HBRUSH
+    LOCAL hReadyBrush:HBRUSH
+    LOCAL hRunBrush:HBRUSH
     LOCAL rc:RECT
     LOCAL x1:DWORD
     LOCAL x2:DWORD
@@ -49,6 +51,9 @@ DrawSchedule PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:
     LOCAL y2:DWORD
     LOCAL textL:DWORD
     LOCAL textR:DWORD
+    LOCAL slot:DWORD
+    LOCAL age:DWORD
+    LOCAL base:DWORD
 
     invoke DrawPanel, hdc, lft, tp, rgt, btm, ADDR SchedText
     mov eax, lft
@@ -71,23 +76,32 @@ DrawSchedule PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:
     invoke DrawCellW, hdc, ADDR SliceText, textL, y1, textR, y2
 
     mov eax, lft
-    add eax, 80
+    add eax, 86
     mov gridL, eax
     mov eax, tp
-    add eax, 82
+    add eax, 74
     mov gridT, eax
     mov eax, rgt
     sub eax, 14
     mov gridR, eax
     mov eax, btm
-    sub eax, 18
+    sub eax, 30
     mov gridB, eax
-    invoke DrawGrid, hdc, gridL, gridT, gridR, gridB, 6, 4
+    cmp OrderCount, 0
+    je draw_schedule_done
+    invoke DrawGrid, hdc, gridL, gridT, gridR, gridB, 6, OrderCount
+    mov eax, gridR
+    sub eax, gridL
+    mov gridW, eax
     mov eax, gridB
     sub eax, gridT
     xor edx, edx
-    mov ebx, 4
+    mov ebx, OrderCount
     div ebx
+    cmp eax, 1
+    jae have_sched_row_h
+    mov eax, 1
+have_sched_row_h:
     mov rowH, eax
 
     mov eax, lft
@@ -96,138 +110,229 @@ DrawSchedule PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:
     mov eax, gridL
     sub eax, 6
     mov textR, eax
-    m2m y1, gridT
-    mov eax, y1
+
+    mov esi, 0
+sched_label_loop:
+    cmp esi, OrderCount
+    jae sched_labels_done
+    mov eax, esi
+    mul rowH
+    add eax, gridT
+    mov y1, eax
     add eax, rowH
     mov y2, eax
-    invoke GetSchedRowText, 0
-    invoke DrawCellA, hdc, eax, textL, y1, textR, y2
-    m2m y1, y2
-    mov eax, y1
-    add eax, rowH
-    mov y2, eax
-    invoke GetSchedRowText, 1
-    invoke DrawCellA, hdc, eax, textL, y1, textR, y2
-    m2m y1, y2
-    mov eax, y1
-    add eax, rowH
-    mov y2, eax
-    invoke GetSchedRowText, 2
-    invoke DrawCellA, hdc, eax, textL, y1, textR, y2
-    m2m y1, y2
+    mov eax, y2
+    cmp eax, gridB
+    jbe sched_label_y_ok
     mov eax, gridB
     mov y2, eax
-    invoke GetSchedRowText, 3
+sched_label_y_ok:
+    mov eax, [OrderIdPtrs+esi*4]
     invoke DrawCellA, hdc, eax, textL, y1, textR, y2
+    inc esi
+    jmp sched_label_loop
+sched_labels_done:
 
+    invoke CreateSolidBrush, 00D9A55Ch
+    mov hReadyBrush, eax
     invoke CreateSolidBrush, 00608048h
-    mov hBrush, eax
+    mov hRunBrush, eax
 
-    mov eax, gridT
-    add eax, 5
-    mov y1, eax
-    mov eax, gridT
-    add eax, rowH
-    sub eax, 5
-    mov y2, eax
-    m2m x1, gridL
-    mov eax, gridR
-    sub eax, gridL
-    mov ebx, 8
-    mul ebx
-    mov ebx, 30
-    div ebx
-    add eax, gridL
-    mov x2, eax
-    invoke SetRect, ADDR rc, x1, y1, x2, y2
-    invoke FillRect, hdc, ADDR rc, hBrush
+    mov eax, SchedHistoryHead
+    cmp eax, 0
+    jne sched_have_prev_slot
+    mov eax, SCHED_HISTORY_SECONDS
+sched_have_prev_slot:
+    dec eax
+    mov slot, eax
+    mov age, 0
+sched_age_loop:
+    mov eax, age
+    cmp eax, SchedHistoryCount
+    jae sched_fill_done
 
-    mov eax, gridT
-    add eax, rowH
-    add eax, 5
-    mov y1, eax
-    mov eax, gridT
-    mov ebx, rowH
-    shl ebx, 1
-    add eax, ebx
-    sub eax, 5
-    mov y2, eax
-    m2m x1, gridL
-    mov eax, gridR
-    sub eax, gridL
-    mov ebx, 8
-    mul ebx
-    mov ebx, 30
+    mov eax, age
+    mul gridW
+    mov ebx, SCHED_HISTORY_SECONDS
     div ebx
-    add eax, gridL
-    mov x2, eax
-    invoke SetRect, ADDR rc, x1, y1, x2, y2
-    invoke FillRect, hdc, ADDR rc, hBrush
-
-    mov eax, gridR
-    sub eax, gridL
-    mov ebx, 2
-    mul ebx
-    mov ebx, 30
+    mov ebx, gridR
+    sub ebx, eax
+    mov x2, ebx
+    mov eax, age
+    inc eax
+    mul gridW
+    mov ebx, SCHED_HISTORY_SECONDS
     div ebx
-    add eax, gridL
+    mov ebx, gridR
+    sub ebx, eax
+    mov x1, ebx
+    cmp ebx, gridL
+    jae sched_x1_ok
+    mov eax, gridL
     mov x1, eax
-    mov eax, gridR
-    sub eax, gridL
-    mov ebx, 12
-    mul ebx
-    mov ebx, 30
-    div ebx
-    add eax, gridL
+sched_x1_ok:
+    mov eax, x2
+    cmp eax, x1
+    ja sched_x_ok
+    mov eax, x1
+    inc eax
     mov x2, eax
-    mov eax, gridT
-    mov ebx, rowH
-    shl ebx, 1
-    add eax, ebx
-    add eax, 5
-    mov y1, eax
-    mov eax, gridT
-    mov ebx, rowH
-    mov ecx, 3
-    imul ebx, ecx
-    add eax, ebx
-    sub eax, 5
-    mov y2, eax
-    invoke SetRect, ADDR rc, x1, y1, x2, y2
-    invoke FillRect, hdc, ADDR rc, hBrush
+sched_x_ok:
+    mov eax, slot
+    mov ebx, ORDER_COUNT
+    mul ebx
+    mov base, eax
 
-    mov eax, gridR
-    sub eax, gridL
-    mov ebx, 5
-    mul ebx
-    mov ebx, 30
-    div ebx
-    add eax, gridL
-    mov x1, eax
-    mov eax, gridR
-    sub eax, gridL
-    mov ebx, 20
-    mul ebx
-    mov ebx, 30
-    div ebx
-    add eax, gridL
-    mov x2, eax
-    mov eax, gridT
-    mov ebx, rowH
-    mov ecx, 3
-    imul ebx, ecx
-    add eax, ebx
-    add eax, 5
+    mov esi, 0
+sched_order_loop:
+    cmp esi, OrderCount
+    jae sched_order_done
+    mov ebx, base
+    mov al, BYTE PTR [SchedHistory+ebx+esi]
+    cmp al, STATE_READY
+    je sched_fill_ready
+    cmp al, STATE_RUN
+    je sched_fill_run
+    jmp sched_next_order
+sched_fill_ready:
+    mov edi, hReadyBrush
+    jmp sched_have_brush
+sched_fill_run:
+    mov edi, hRunBrush
+sched_have_brush:
+    mov eax, esi
+    mul rowH
+    add eax, gridT
+    inc eax
     mov y1, eax
+    add eax, rowH
+    sub eax, 2
+    mov y2, eax
+    mov eax, y2
+    cmp eax, y1
+    ja sched_y_height_ok
+    mov eax, y1
+    inc eax
+    mov y2, eax
+sched_y_height_ok:
+    mov eax, y2
+    cmp eax, gridB
+    jbe sched_y_ok
     mov eax, gridB
-    sub eax, 5
     mov y2, eax
+sched_y_ok:
     invoke SetRect, ADDR rc, x1, y1, x2, y2
-    invoke FillRect, hdc, ADDR rc, hBrush
-    invoke DeleteObject, hBrush
+    invoke FillRect, hdc, ADDR rc, edi
+sched_next_order:
+    inc esi
+    jmp sched_order_loop
+sched_order_done:
+    mov eax, slot
+    cmp eax, 0
+    jne sched_dec_slot
+    mov eax, SCHED_HISTORY_SECONDS
+sched_dec_slot:
+    dec eax
+    mov slot, eax
+    inc age
+    jmp sched_age_loop
+sched_fill_done:
+    invoke DeleteObject, hReadyBrush
+    invoke DeleteObject, hRunBrush
 
+    mov eax, gridB
+    add eax, 4
+    mov y1, eax
+    add eax, 18
+    mov y2, eax
+    mov eax, gridL
+    sub eax, 12
+    mov x1, eax
+    mov eax, gridL
+    add eax, 36
+    mov x2, eax
+    invoke DrawCellA, hdc, ADDR AxisStartA, x1, y1, x2, y2
+    mov eax, gridW
+    shr eax, 1
+    add eax, gridL
+    sub eax, 20
+    mov x1, eax
+    add eax, 48
+    mov x2, eax
+    invoke DrawCellA, hdc, ADDR AxisMidA, x1, y1, x2, y2
+    mov eax, gridR
+    sub eax, 36
+    mov x1, eax
+    mov eax, gridR
+    add eax, 12
+    mov x2, eax
+    invoke DrawCellA, hdc, ADDR AxisNowA, x1, y1, x2, y2
+
+draw_schedule_done:
     ret
 DrawSchedule ENDP
+
+; ------------------------------------------------------------
+; Proc: RecordScheduleHistory
+; Input:
+;   无
+; Output:
+;   无；把当前 READY/RUN 状态写入 60 秒环形历史
+; Clobbers:
+;   EAX, ECX, EDX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   写 SchedHistory/SchedHistoryHead/SchedHistoryCount。
+; ------------------------------------------------------------
+RecordScheduleHistory PROC USES ebx esi edi
+    mov eax, SchedHistoryHead
+    mov ebx, ORDER_COUNT
+    mul ebx
+    mov edi, OFFSET SchedHistory
+    add edi, eax
+
+    mov esi, 0
+sched_hist_clear:
+    cmp esi, ORDER_COUNT
+    jae sched_hist_scan_begin
+    mov BYTE PTR [edi+esi], 0
+    inc esi
+    jmp sched_hist_clear
+
+sched_hist_scan_begin:
+    mov esi, 0
+sched_hist_scan:
+    cmp esi, OrderCount
+    jae sched_hist_advance
+    mov al, BYTE PTR [OrderState+esi]
+    cmp al, STATE_READY
+    je sched_hist_store
+    cmp al, STATE_RUN
+    je sched_hist_store
+    jmp sched_hist_next
+sched_hist_store:
+    mov BYTE PTR [edi+esi], al
+sched_hist_next:
+    inc esi
+    jmp sched_hist_scan
+
+sched_hist_advance:
+    mov eax, SchedHistoryHead
+    inc eax
+    cmp eax, SCHED_HISTORY_SECONDS
+    jb sched_hist_head_ok
+    xor eax, eax
+sched_hist_head_ok:
+    mov SchedHistoryHead, eax
+    mov eax, SchedHistoryCount
+    cmp eax, SCHED_HISTORY_SECONDS
+    jae sched_hist_done
+    inc eax
+    mov SchedHistoryCount, eax
+sched_hist_done:
+    ret
+RecordScheduleHistory ENDP
 
 ; ------------------------------------------------------------
 ; Proc: InitSimulation
@@ -245,9 +350,10 @@ DrawSchedule ENDP
 ;   这是全局硬重置；以后增加新的仿真状态时，必须在这里补初始化。
 ; ------------------------------------------------------------
 InitSimulation PROC USES ebx esi edi
+    invoke LoadOrdersFromCsv
     mov esi, 0
 init_orders:
-    cmp esi, ORDER_COUNT
+    cmp esi, OrderCount
     jae init_orders_done
     mov BYTE PTR [OrderState+esi], STATE_NEW
     mov eax, [OrderTotalTime+esi*4]
@@ -273,7 +379,7 @@ init_orders_done:
     mov BYTE PTR [ResMaxDemand+2], 0
     mov esi, 0
 max_order_loop:
-    cmp esi, ORDER_COUNT
+    cmp esi, OrderCount
     jae max_done
     mov ebx, esi
     lea ebx, [ebx+ebx*2]
@@ -292,6 +398,8 @@ max_done:
     mov CurrentOrder, INVALID_ORDER
     mov SliceLeft, 0
     mov ParallelLimit, 1
+    mov SchedHistoryHead, 0
+    mov SchedHistoryCount, 0
     mov esi, 0
 init_running_slots:
     cmp esi, MAX_PARALLEL
@@ -326,6 +434,22 @@ skip_queue_init:
     inc esi
     jmp init_queue_cache
 init_cache_done:
+    mov esi, 0
+init_queue_all:
+    cmp esi, QUEUE_SIZE
+    jae init_queue_all_done
+    mov BYTE PTR [ReadyQueue+esi], 0FFh
+    inc esi
+    jmp init_queue_all
+init_queue_all_done:
+    mov esi, 0
+init_sched_history:
+    cmp esi, SCHED_HISTORY_SECONDS * ORDER_COUNT
+    jae init_sched_history_done
+    mov BYTE PTR [SchedHistory+esi], 0
+    inc esi
+    jmp init_sched_history
+init_sched_history_done:
     invoke AddLogEvent, ADDR LogInitA, INVALID_ORDER
     ret
 InitSimulation ENDP
@@ -341,17 +465,17 @@ InitSimulation ENDP
 ; Preserves:
 ;   EBX, ESI, EDI
 ; Side effects:
-;   推进 SimClock；尝试接纳所有可接纳订单；运行每个运行槽 1 秒；
+;   推进 SimClock；先调度上一轮暂存订单，运行每个运行槽 1 秒；
 ;   更新订单暂存、资源分配、订单状态和就绪队列。
 ; Notes:
 ;   时间片长度写死为 2 秒；并行槽位数量由 ParallelLimit 控制，
-;   等待订单的公平性仍依赖 NextAdmission 轮转扫描。
+;   本 tick 新接纳的订单留在暂存区，下一 tick 才会被调度，便于可视化等待状态。
 ; ------------------------------------------------------------
 SimTick PROC USES ebx esi edi
     inc SimClock
 
-    invoke AdmitRunnableOrders
     invoke FillRunningSlots
+    invoke RecordScheduleHistory
 
     mov esi, 0
 run_slot_loop:
@@ -386,7 +510,6 @@ next_run_slot:
     jmp run_slot_loop
 run_slots_done:
     invoke AdmitRunnableOrders
-    invoke FillRunningSlots
     invoke RefreshCurrentOrder
     cmp CurrentOrder, INVALID_ORDER
     jne tick_done
@@ -419,12 +542,12 @@ AdmitRunnableOrders PROC USES ebx esi edi
     mov scanBase, eax
     mov esi, 0
 admit_scan:
-    cmp esi, ORDER_COUNT
+    cmp esi, OrderCount
     jae admit_done
     mov eax, scanBase
     add eax, esi
     xor edx, edx
-    mov ebx, ORDER_COUNT
+    mov ebx, OrderCount
     div ebx
     mov edi, edx
     movzx eax, BYTE PTR [OrderState+edi]
@@ -435,7 +558,7 @@ admit_scan:
         mov eax, edi
         inc eax
         xor edx, edx
-        mov ebx, ORDER_COUNT
+        mov ebx, OrderCount
         div ebx
         mov NextAdmission, edx
     .endif
@@ -564,11 +687,15 @@ RefreshCurrentOrder ENDP
 ; Side effects:
 ;   写 ReadyQueue/QueueTail/QueueCount。
 ; Notes:
-;   队列满时静默丢弃；QUEUE_SIZE 必须为 2 的幂，因为用 and 做环形取模。
+;   队列满时先按 LRU 淘汰队首订单；QUEUE_SIZE 必须为 2 的幂，因为用 and 做环形取模。
 ; ------------------------------------------------------------
 EnqueueOrder PROC USES ebx orderIndex:DWORD
     cmp QueueCount, QUEUE_SIZE
-    jae enqueue_done
+    jb enqueue_has_space
+    invoke EvictReadyOrder
+    cmp eax, INVALID_ORDER
+    je enqueue_done
+enqueue_has_space:
     mov ebx, QueueTail
     mov eax, orderIndex
     mov [ReadyQueue+ebx], al
@@ -579,6 +706,48 @@ EnqueueOrder PROC USES ebx orderIndex:DWORD
 enqueue_done:
     ret
 EnqueueOrder ENDP
+
+; ------------------------------------------------------------
+; Proc: EvictReadyOrder
+; Input:
+;   无
+; Output:
+;   EAX = 被 LRU 淘汰的订单下标；无可淘汰订单时为 INVALID_ORDER
+; Clobbers:
+;   EAX
+; Preserves:
+;   EBX, ESI
+; Side effects:
+;   从暂存队列移出最久等待订单，释放其已分配资源，并清空生产进度。
+; Notes:
+;   暂存区只保存 READY 订单；队首就是最久未被调度使用的块。
+; ------------------------------------------------------------
+EvictReadyOrder PROC USES ebx esi
+    invoke DequeueOrder
+    cmp eax, INVALID_ORDER
+    jne have_lru_victim
+    ret
+have_lru_victim:
+    mov esi, eax
+    mov ebx, esi
+    lea ebx, [ebx+ebx*2]
+    mov al, [OrderAlloc+ebx]
+    add [ResAvail], al
+    mov BYTE PTR [OrderAlloc+ebx], 0
+    mov al, [OrderAlloc+ebx+1]
+    add [ResAvail+1], al
+    mov BYTE PTR [OrderAlloc+ebx+1], 0
+    mov al, [OrderAlloc+ebx+2]
+    add [ResAvail+2], al
+    mov BYTE PTR [OrderAlloc+ebx+2], 0
+    mov eax, [OrderTotalTime+esi*4]
+    mov [OrderRemain+esi*4], eax
+    mov DWORD PTR [OrderRunTime+esi*4], 0
+    mov BYTE PTR [OrderState+esi], STATE_WAIT
+    invoke AddLogEvent, ADDR LogLruResetA, esi
+    mov eax, esi
+    ret
+EvictReadyOrder ENDP
 
 ; ------------------------------------------------------------
 ; Proc: DequeueOrder

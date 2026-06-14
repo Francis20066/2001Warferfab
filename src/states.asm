@@ -61,6 +61,9 @@ FmtTick        db "%u",0
 FmtLog         db "T%03u  %-8s  %s",0
 FmtOrderPage   db "Page %u/%u",0
 FmtOrderId     db "ORDER%03u",0
+AxisStartA     db "-60s",0
+AxisMidA       db "-30s",0
+AxisNowA       db "now",0
 TimeBuffer     db 64 dup(0)
 PageBuffer     db 16 dup(0)
 TickBuffer     db 16 dup(0)
@@ -152,6 +155,7 @@ LogWaitSafeA   db "blocked by safe check",0
 LogRunA        db "dispatch to CPU",0
 LogDoneA       db "finished and released",0
 LogRotateA     db "time slice expired",0
+LogLruResetA   db "LRU evicted: progress reset",0
 LogIdleA       db "idle: ready queue empty",0
 
 ; 显示查找表：用状态值、优先级值或设备编号直接换成字符串地址。
@@ -167,6 +171,7 @@ ParallelBtnTextPtrs dd OFFSET Num1W, OFFSET Num2W, OFFSET Num3W
 
 ; 
 OrderPath       db "resource/orders.csv",0
+OrderBuildPath  db "..\resource\orders.csv",0
 OrderFallbackPath db "resource/orders",0
 OrderLoadBuffer db ORDER_CSV_BUFFER_SIZE dup(0)
 OrderIdStorage db ORDER_COUNT * ORDER_ID_LEN dup(0)
@@ -200,6 +205,9 @@ SliceLeft      dd 0
 ParallelLimit  dd 1
 RunningOrders  dd MAX_PARALLEL dup(INVALID_ORDER)
 RunningSliceLeft dd MAX_PARALLEL dup(0)
+SchedHistoryHead dd 0
+SchedHistoryCount dd 0
+SchedHistory   db SCHED_HISTORY_SECONDS * ORDER_COUNT dup(0)
 NextAdmission  dd 0
 SimClock       dd 0
 hParallelLabel dd 0

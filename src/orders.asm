@@ -53,10 +53,10 @@ DrawOrderTable PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, bt
     inc eax
     invoke wsprintfA, ADDR PageBuffer, ADDR FmtOrderPage, eax, OrderPageCount
     mov eax, rgt
-    sub eax, 112
+    sub eax, 172
     mov x1, eax
     mov eax, rgt
-    sub eax, 8
+    sub eax, 74
     mov x2, eax
     mov eax, tp
     add eax, 4
@@ -270,3 +270,371 @@ prio_ok:
     mov eax, [PriorityPtrs+eax*4]
     ret
 GetPriorityText ENDP
+
+; ------------------------------------------------------------
+; Proc: UpdateOrderPageCount
+; Input:
+;   无
+; Output:
+;   无
+; Clobbers:
+;   EAX, EBX, EDX
+; Preserves:
+;   ECX, ESI, EDI
+; Side effects:
+;   根据 OrderCount 重算分页总数，并把 OrderPage 钳制在有效范围内。
+; ------------------------------------------------------------
+UpdateOrderPageCount PROC USES ecx esi edi
+    mov eax, OrderCount
+    cmp eax, 0
+    jne have_order_count
+    mov eax, 1
+have_order_count:
+    add eax, ORDERS_PER_PAGE - 1
+    xor edx, edx
+    mov ebx, ORDERS_PER_PAGE
+    div ebx
+    cmp eax, 1
+    jae have_page_count
+    mov eax, 1
+have_page_count:
+    mov OrderPageCount, eax
+    mov ebx, OrderPage
+    cmp ebx, eax
+    jb page_ok
+    dec eax
+    mov OrderPage, eax
+page_ok:
+    ret
+UpdateOrderPageCount ENDP
+
+; ------------------------------------------------------------
+; Proc: InitOrderIdPtrs
+; Input:
+;   无
+; Output:
+;   无
+; Clobbers:
+;   EAX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   将 OrderIdPtrs 指向固定长度的 OrderIdStorage 记录。
+; ------------------------------------------------------------
+InitOrderIdPtrs PROC USES ebx esi edi
+    mov esi, 0
+    mov edi, OFFSET OrderIdStorage
+init_id_ptr_loop:
+    cmp esi, ORDER_COUNT
+    jae init_id_ptr_done
+    mov [OrderIdPtrs+esi*4], edi
+    add edi, ORDER_ID_LEN
+    inc esi
+    jmp init_id_ptr_loop
+init_id_ptr_done:
+    ret
+InitOrderIdPtrs ENDP
+
+; ------------------------------------------------------------
+; Proc: SetDefaultOrders
+; Input:
+;   无
+; Output:
+;   无
+; Clobbers:
+;   EAX, ECX, EDX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   写入 6 条默认订单；CSV 打不开或无有效行时使用。
+; ------------------------------------------------------------
+SetDefaultOrders PROC USES ebx esi edi
+    mov OrderCount, DEFAULT_ORDER_COUNT
+    mov OrderPage, 0
+    mov esi, 0
+default_order_loop:
+    cmp esi, DEFAULT_ORDER_COUNT
+    jae default_order_done
+    mov edi, [OrderIdPtrs+esi*4]
+    mov eax, esi
+    inc eax
+    invoke wsprintfA, edi, ADDR FmtOrderId, eax
+
+    mov al, [DefaultPriority+esi]
+    mov [OrderPriority+esi], al
+    mov ebx, esi
+    lea ebx, [ebx+ebx*2]
+    mov al, [DefaultNeed+ebx]
+    mov [OrderNeed+ebx], al
+    mov al, [DefaultNeed+ebx+1]
+    mov [OrderNeed+ebx+1], al
+    mov al, [DefaultNeed+ebx+2]
+    mov [OrderNeed+ebx+2], al
+    mov eax, [DefaultTotalTime+esi*4]
+    mov [OrderTotalTime+esi*4], eax
+    inc esi
+    jmp default_order_loop
+default_order_done:
+    invoke UpdateOrderPageCount
+    ret
+SetDefaultOrders ENDP
+
+; ------------------------------------------------------------
+; Proc: CsvReadNumber
+; Input:
+;   pCursor    = 当前字段起始位置
+;   pOutCursor = DWORD*，返回下一个字段或行尾位置
+; Output:
+;   EAX = 解析出的无符号整数；EDX = 读到的数字个数
+; Clobbers:
+;   EAX, ECX, EDX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   写 pOutCursor。
+; ------------------------------------------------------------
+CsvReadNumber PROC USES ebx esi edi pCursor:DWORD, pOutCursor:DWORD
+    mov esi, pCursor
+    xor eax, eax
+    xor edi, edi
+csv_num_skip_left:
+    mov bl, [esi]
+    cmp bl, 020h
+    je csv_num_skip_one
+    cmp bl, 009h
+    jne csv_num_loop
+csv_num_skip_one:
+    inc esi
+    jmp csv_num_skip_left
+csv_num_loop:
+    mov bl, [esi]
+    cmp bl, 030h
+    jb csv_num_done
+    cmp bl, 039h
+    ja csv_num_done
+    mov ecx, eax
+    shl eax, 1
+    shl ecx, 3
+    add eax, ecx
+    movzx ecx, bl
+    sub ecx, 030h
+    add eax, ecx
+    inc esi
+    inc edi
+    jmp csv_num_loop
+csv_num_done:
+    mov bl, [esi]
+    cmp bl, 020h
+    je csv_num_trim_one
+    cmp bl, 009h
+    jne csv_num_after_trim
+csv_num_trim_one:
+    inc esi
+    jmp csv_num_done
+csv_num_after_trim:
+    cmp bl, 02Ch
+    jne csv_num_store_cursor
+    inc esi
+csv_num_store_cursor:
+    mov ebx, pOutCursor
+    mov [ebx], esi
+    mov edx, edi
+    ret
+CsvReadNumber ENDP
+
+; ------------------------------------------------------------
+; Proc: ParseOrderCsv
+; Input:
+;   pBuffer = 以 0 结尾的 CSV 文本，格式 id,priority,need0,need1,need2,time
+; Output:
+;   EAX = 成功读取的订单数
+; Clobbers:
+;   EAX, ECX, EDX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   写 OrderIdStorage/OrderPriority/OrderNeed/OrderTotalTime。
+; ------------------------------------------------------------
+ParseOrderCsv PROC USES ebx esi edi pBuffer:DWORD
+    LOCAL cursor:DWORD
+    LOCAL idDest:DWORD
+    LOCAL idLen:DWORD
+    LOCAL needBase:DWORD
+    LOCAL rowCount:DWORD
+
+    mov esi, pBuffer
+    mov rowCount, 0
+parse_line_start:
+    mov edi, rowCount
+    cmp edi, ORDER_COUNT
+    jae parse_done
+parse_skip_start:
+    mov al, [esi]
+    cmp al, 0
+    je parse_done
+    cmp al, 0EFh
+    jne parse_not_bom
+    add esi, 3
+    jmp parse_skip_start
+parse_not_bom:
+    cmp al, 020h
+    je parse_skip_one
+    cmp al, 009h
+    je parse_skip_one
+    cmp al, 00Dh
+    je parse_skip_one
+    cmp al, 00Ah
+    jne parse_after_skip
+parse_skip_one:
+    inc esi
+    jmp parse_skip_start
+parse_after_skip:
+    cmp al, 023h
+    je parse_bad_line
+    cmp al, 069h
+    je parse_bad_line
+    cmp al, 049h
+    je parse_bad_line
+
+    mov eax, edi
+    mov ebx, ORDER_ID_LEN
+    mul ebx
+    mov idDest, OFFSET OrderIdStorage
+    add idDest, eax
+    mov ebx, idDest
+    mov idLen, 0
+copy_csv_id:
+    mov al, [esi]
+    cmp al, 0
+    je parse_done
+    cmp al, 02Ch
+    je csv_id_done
+    cmp al, 00Dh
+    je parse_bad_line
+    cmp al, 00Ah
+    je parse_bad_line
+    mov ecx, idLen
+    cmp ecx, ORDER_ID_LEN - 1
+    jae csv_id_skip_store
+    mov [ebx+ecx], al
+    inc idLen
+csv_id_skip_store:
+    inc esi
+    jmp copy_csv_id
+csv_id_done:
+    mov ecx, idLen
+    cmp ecx, 0
+    je parse_bad_line
+    mov BYTE PTR [ebx+ecx], 0
+    inc esi
+    mov cursor, esi
+
+    invoke CsvReadNumber, cursor, ADDR cursor
+    cmp edx, 0
+    je parse_bad_line
+    cmp eax, 2
+    jbe csv_prio_ok
+    mov eax, 2
+csv_prio_ok:
+    mov edi, rowCount
+    mov [OrderPriority+edi], al
+
+    mov ebx, edi
+    lea ebx, [ebx+ebx*2]
+    mov needBase, ebx
+
+    invoke CsvReadNumber, cursor, ADDR cursor
+    cmp edx, 0
+    je parse_bad_line
+    mov ebx, needBase
+    mov [OrderNeed+ebx], al
+
+    invoke CsvReadNumber, cursor, ADDR cursor
+    cmp edx, 0
+    je parse_bad_line
+    mov ebx, needBase
+    mov [OrderNeed+ebx+1], al
+
+    invoke CsvReadNumber, cursor, ADDR cursor
+    cmp edx, 0
+    je parse_bad_line
+    mov ebx, needBase
+    mov [OrderNeed+ebx+2], al
+
+    invoke CsvReadNumber, cursor, ADDR cursor
+    cmp edx, 0
+    je parse_bad_line
+    mov edi, rowCount
+    mov [OrderTotalTime+edi*4], eax
+    inc rowCount
+    mov esi, cursor
+    jmp parse_bad_line
+
+parse_bad_line:
+    mov al, [esi]
+    cmp al, 0
+    je parse_done
+    cmp al, 00Ah
+    je parse_next_line
+    inc esi
+    jmp parse_bad_line
+parse_next_line:
+    inc esi
+    jmp parse_line_start
+parse_done:
+    mov eax, rowCount
+    ret
+ParseOrderCsv ENDP
+
+; ------------------------------------------------------------
+; Proc: LoadOrdersFromCsv
+; Input:
+;   无
+; Output:
+;   无
+; Clobbers:
+;   EAX, ECX, EDX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   初始化订单指针，读取 resource/orders.csv，成功时覆盖默认订单。
+; ------------------------------------------------------------
+LoadOrdersFromCsv PROC USES ebx esi edi
+    LOCAL hFile:DWORD
+    LOCAL bytesRead:DWORD
+
+    invoke InitOrderIdPtrs
+    invoke SetDefaultOrders
+
+    invoke CreateFileA, ADDR OrderPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL
+    mov hFile, eax
+    cmp eax, INVALID_HANDLE_VALUE
+    jne csv_opened
+    invoke CreateFileA, ADDR OrderBuildPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL
+    mov hFile, eax
+    cmp eax, INVALID_HANDLE_VALUE
+    jne csv_opened
+    invoke CreateFileA, ADDR OrderFallbackPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL
+    mov hFile, eax
+    cmp eax, INVALID_HANDLE_VALUE
+    je load_csv_done
+csv_opened:
+    invoke ReadFile, hFile, ADDR OrderLoadBuffer, ORDER_CSV_BUFFER_SIZE - 1, ADDR bytesRead, NULL
+    push eax
+    invoke CloseHandle, hFile
+    pop eax
+    cmp eax, 0
+    je load_csv_done
+    mov eax, bytesRead
+    cmp eax, 0
+    je load_csv_done
+    mov BYTE PTR [OrderLoadBuffer+eax], 0
+    invoke ParseOrderCsv, ADDR OrderLoadBuffer
+    cmp eax, 0
+    je load_csv_done
+    mov OrderCount, eax
+    mov OrderPage, 0
+    invoke UpdateOrderPageCount
+load_csv_done:
+    ret
+LoadOrdersFromCsv ENDP

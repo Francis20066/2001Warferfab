@@ -69,6 +69,7 @@ DrawSchedule   PROTO :HDC, :DWORD, :DWORD, :DWORD, :DWORD
 DrawBuffer     PROTO :HDC, :DWORD, :DWORD, :DWORD, :DWORD
 DrawLogs       PROTO :HDC, :DWORD, :DWORD, :DWORD, :DWORD
 AddLogEvent    PROTO :DWORD, :DWORD
+RecordScheduleHistory PROTO
 LoadOrdersFromCsv PROTO
 UpdateOrderPageCount PROTO
 InitSimulation PROTO
@@ -85,6 +86,7 @@ TryAdmitOrder  PROTO :DWORD
 BankerSafe     PROTO
 EnqueueOrder   PROTO :DWORD
 DequeueOrder   PROTO
+EvictReadyOrder PROTO
 ReleaseOrder   PROTO :DWORD
 AccessOrderPage PROTO :DWORD
 GetStatusText  PROTO :DWORD
@@ -103,6 +105,7 @@ QUEUE_SIZE     equ 16
 CACHE_SIZE     equ 16
 LOG_COUNT      equ 4
 LOG_LINE_LEN   equ 96
+SCHED_HISTORY_SECONDS equ 60
 INVALID_ORDER  equ 0FFFFFFFFh
 STATE_NEW      equ 0
 STATE_READY    equ 1
@@ -188,7 +191,7 @@ WinMain PROC hInst:HINSTANCE, hPrev:HINSTANCE, CmdLine:LPSTR, CmdShow:DWORD
     invoke AppendMenuA, hMenu, MF_STRING, MENU_HELP, ADDR MenuHelp
 
     invoke CreateWindowExW, 0, ADDR ClassNameW, ADDR TitleText, \
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 980, 720, \
+        WS_OVERLAPPEDWINDOW or WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 980, 720, \
         NULL, hMenu, hInst, NULL
     mov hWnd, eax
     invoke ShowWindow, hWnd, CmdShow
@@ -255,6 +258,7 @@ WndProc PROC hWnd:HWND, uMsg:UINT, wParam:WPARAM, lParam:LPARAM
             jbe order_prev_done
             dec OrderPage
 order_prev_done:
+            invoke LayoutOrderPageControls, hWnd
             invoke InvalidateRect, hWnd, NULL, FALSE
             xor eax, eax
             ret
@@ -265,6 +269,7 @@ order_prev_done:
             jae order_next_done
             mov OrderPage, eax
 order_next_done:
+            invoke LayoutOrderPageControls, hWnd
             invoke InvalidateRect, hWnd, NULL, FALSE
             xor eax, eax
             ret
@@ -285,6 +290,8 @@ order_next_done:
         mov hdc, eax
         invoke PaintUI, hWnd, hdc
         invoke EndPaint, hWnd, ADDR ps
+        invoke LayoutParallelControls, hWnd
+        invoke LayoutOrderPageControls, hWnd
         xor eax, eax
         ret
     .elseif uMsg == WM_DESTROY
