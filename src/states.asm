@@ -26,7 +26,7 @@
 ; Clobbers:
 ;   无；这里只有数据定义。
 ; Preserves:
-;   不适用。
+;   无。
 ; Side effects:
 ;   定义可变全局状态，scheduler/banker/pager/ui 会读写这些变量。
 ; Notes:
@@ -55,6 +55,7 @@ FmtSec         db "%us",0
 FmtFifo        db "FIFO  hit %u  fault %u",0
 FmtLru         db "LRU   hit %u  fault %u",0
 FmtTick        db "%u",0
+FmtLog         db "T%03u  %-8s  %s",0
 TimeBuffer     db 64 dup(0)
 PageBuffer     db 16 dup(0)
 TickBuffer     db 16 dup(0)
@@ -124,6 +125,14 @@ DashTextA      db "--",0
 FifoTextA      db "FIFO  hit 71%",0
 LruTextA       db "LRU   hit 84%",0
 CacheTextA     db "16 page process cache",0
+LogInitA       db "simulation initialized",0
+LogAdmitA      db "admitted by banker",0
+LogWaitResA    db "waiting for resources",0
+LogWaitSafeA   db "blocked by safe check",0
+LogRunA        db "dispatch to CPU",0
+LogDoneA       db "finished and released",0
+LogRotateA     db "time slice expired",0
+LogIdleA       db "idle: ready queue empty",0
 
 ; 显示查找表：用状态值、优先级值或设备编号直接换成字符串地址。
 OrderIdPtrs    dd OFFSET Order001, OFFSET Order002, OFFSET Order003
@@ -132,6 +141,14 @@ StatusPtrs     dd OFFSET NewTextA, OFFSET ReadyTextA, OFFSET RunTextA
                dd OFFSET DoneTextA, OFFSET WaitTextA
 PriorityPtrs   dd OFFSET P0TextA, OFFSET P1TextA, OFFSET P2TextA
 DevPtrs        dd OFFSET Dev0Text, OFFSET Dev1Text, OFFSET Dev2Text
+
+
+
+; 
+OrderPath       db "resource/orders",0
+OrderLoadBuffer db 1024 dup(0)
+
+
 
 ; 算法状态：订单、资源、RR 就绪队列、FIFO/LRU 页面缓存。
 ; 约定：
@@ -167,4 +184,7 @@ LruAge         dd CACHE_SIZE dup(0)
 LruClock       dd 0
 LruHits        dd 0
 LruFaults      dd 0
+LogHead        dd 0
+LogCount       dd 0
+LogBuffer      db LOG_COUNT * LOG_LINE_LEN dup(0)
 

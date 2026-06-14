@@ -68,6 +68,7 @@ DrawResourceTable PROTO :HDC, :DWORD, :DWORD, :DWORD, :DWORD
 DrawSchedule   PROTO :HDC, :DWORD, :DWORD, :DWORD, :DWORD
 DrawBuffer     PROTO :HDC, :DWORD, :DWORD, :DWORD, :DWORD
 DrawLogs       PROTO :HDC, :DWORD, :DWORD, :DWORD, :DWORD
+AddLogEvent    PROTO :DWORD, :DWORD
 InitSimulation PROTO
 SimTick        PROTO
 TryAdmitOrder  PROTO :DWORD
@@ -85,6 +86,8 @@ ORDER_COUNT    equ 6
 RES_COUNT      equ 3
 QUEUE_SIZE     equ 16
 CACHE_SIZE     equ 16
+LOG_COUNT      equ 4
+LOG_LINE_LEN   equ 96
 INVALID_ORDER  equ 0FFFFFFFFh
 STATE_NEW      equ 0
 STATE_READY    equ 1

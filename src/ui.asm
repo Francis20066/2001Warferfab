@@ -340,8 +340,14 @@ v_loop:
     mov eax, i
     cmp eax, cols
     ja v_done
+    jne v_draw
+    m2m x, rgt
+v_draw:
     invoke MoveToEx, hdc, x, tp, NULL
     invoke LineTo, hdc, x, btm
+    mov eax, i
+    cmp eax, cols
+    jae v_done
     mov eax, x
     add eax, step
     mov x, eax
@@ -360,8 +366,14 @@ h_loop:
     mov eax, i
     cmp eax, rows
     ja h_done
+    jne h_draw
+    m2m y, btm
+h_draw:
     invoke MoveToEx, hdc, lft, y, NULL
     invoke LineTo, hdc, rgt, y
+    mov eax, i
+    cmp eax, rows
+    jae h_done
     mov eax, y
     add eax, step
     mov y, eax
@@ -374,26 +386,77 @@ h_done:
 DrawGrid ENDP
 
 ; ------------------------------------------------------------
+; Proc: AddLogEvent
+; Input:
+;   eventText  = ANSI 事件文本地址
+;   orderIndex = 订单下标，INVALID_ORDER 表示系统事件
+; Output:
+;   无；把格式化后的日志写入环形缓冲
+; Clobbers:
+;   EAX, ECX, EDX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   写 LogBuffer/LogHead/LogCount，复用 wsprintfA。
+; Notes:
+;   日志使用 ANSI 文本，避免源码编码影响中文字符串。
+; ------------------------------------------------------------
+AddLogEvent PROC USES ebx esi edi eventText:DWORD, orderIndex:DWORD
+    mov eax, LogHead
+    mov ebx, LOG_LINE_LEN
+    mul ebx
+    mov edi, OFFSET LogBuffer
+    add edi, eax
+
+    mov eax, orderIndex
+    cmp eax, ORDER_COUNT
+    jb log_has_order
+    mov esi, OFFSET DashTextA
+    jmp log_format
+log_has_order:
+    mov esi, [OrderIdPtrs+eax*4]
+log_format:
+    invoke wsprintfA, edi, ADDR FmtLog, SimClock, esi, eventText
+
+    mov eax, LogHead
+    inc eax
+    cmp eax, LOG_COUNT
+    jb log_head_ok
+    xor eax, eax
+log_head_ok:
+    mov LogHead, eax
+    mov eax, LogCount
+    cmp eax, LOG_COUNT
+    jae log_done
+    inc eax
+    mov LogCount, eax
+log_done:
+    ret
+AddLogEvent ENDP
+
+; ------------------------------------------------------------
 ; Proc: DrawLogs
 ; Input:
 ;   hdc             = 绘制目标
 ;   lft,tp,rgt,btm = 日志面板矩形
 ; Output:
-;   无；绘制固定的系统日志说明文字
+;   无；绘制最近的系统事件日志
 ; Clobbers:
 ;   EAX, ECX, EDX
 ; Preserves:
 ;   无显式保存
 ; Side effects:
-;   调用 DrawPanel/DrawCellW 写入 hdc。
+;   调用 DrawPanel/DrawCellA 写入 hdc。
 ; Notes:
-;   日志内容是静态说明，不是逐 tick 的真实事件历史。
+;   LogBuffer 是环形缓冲；满后从 LogHead 开始读到的就是最旧条目。
 ; ------------------------------------------------------------
-DrawLogs PROC hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:DWORD
+DrawLogs PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:DWORD
     LOCAL x1:DWORD
     LOCAL x2:DWORD
     LOCAL y1:DWORD
     LOCAL y2:DWORD
+    LOCAL lineH:DWORD
+    LOCAL idx:DWORD
 
     invoke DrawPanel, hdc, lft, tp, rgt, btm, ADDR LogText
     mov eax, lft
@@ -403,32 +466,55 @@ DrawLogs PROC hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:DWORD
     sub eax, 18
     mov x2, eax
     mov eax, tp
-    add eax, 34
+    add eax, 32
     mov y1, eax
+    mov eax, btm
+    sub eax, 6
+    cmp eax, y1
+    jbe logs_done
+    sub eax, y1
+    xor edx, edx
+    mov ebx, LOG_COUNT
+    div ebx
+    cmp eax, 1
+    jae have_log_line_height
+    mov eax, 1
+have_log_line_height:
+    mov lineH, eax
+
+    mov esi, 0
+draw_log_loop:
+    cmp esi, LogCount
+    jae logs_done
+    mov eax, LogCount
+    cmp eax, LOG_COUNT
+    jne log_not_full
+    mov eax, LogHead
+    add eax, esi
+    jmp log_wrap
+log_not_full:
+    mov eax, esi
+log_wrap:
+    cmp eax, LOG_COUNT
+    jb log_idx_ok
+    sub eax, LOG_COUNT
+log_idx_ok:
+    mov idx, eax
+    mov ebx, LOG_LINE_LEN
+    mul ebx
+    mov edi, OFFSET LogBuffer
+    add edi, eax
+
     mov eax, y1
-    add eax, 20
+    add eax, lineH
+    dec eax
     mov y2, eax
-    invoke DrawCellW, hdc, ADDR LogLine1, x1, y1, x2, y2
-    mov eax, y2
-    add eax, 4
+    invoke DrawCellA, hdc, edi, x1, y1, x2, y2
+    mov eax, y1
+    add eax, lineH
     mov y1, eax
-    mov eax, y1
-    add eax, 20
-    mov y2, eax
-    invoke DrawCellW, hdc, ADDR LogLine2, x1, y1, x2, y2
-    mov eax, y2
-    add eax, 4
-    mov y1, eax
-    mov eax, y1
-    add eax, 20
-    mov y2, eax
-    invoke DrawCellW, hdc, ADDR LogLine3, x1, y1, x2, y2
-    mov eax, y2
-    add eax, 4
-    mov y1, eax
-    mov eax, y1
-    add eax, 20
-    mov y2, eax
-    invoke DrawCellW, hdc, ADDR LogLine4, x1, y1, x2, y2
+    inc esi
+    jmp draw_log_loop
+logs_done:
     ret
 DrawLogs ENDP
