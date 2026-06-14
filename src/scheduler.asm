@@ -291,6 +291,16 @@ max_done:
     mov QueueCount, 0
     mov CurrentOrder, INVALID_ORDER
     mov SliceLeft, 0
+    mov ParallelLimit, 1
+    mov esi, 0
+init_running_slots:
+    cmp esi, MAX_PARALLEL
+    jae init_running_done
+    mov DWORD PTR [RunningOrders+esi*4], INVALID_ORDER
+    mov DWORD PTR [RunningSliceLeft+esi*4], 0
+    inc esi
+    jmp init_running_slots
+init_running_done:
     mov NextAdmission, 0
     mov SimClock, 0
     mov FifoCursor, 0
@@ -299,6 +309,8 @@ max_done:
     mov LruClock, 0
     mov LruHits, 0
     mov LruFaults, 0
+    mov LogHead, 0
+    mov LogCount, 0
 
     mov esi, 0
 init_queue_cache:
@@ -314,6 +326,7 @@ skip_queue_init:
     inc esi
     jmp init_queue_cache
 init_cache_done:
+    invoke AddLogEvent, ADDR LogInitA, INVALID_ORDER
     ret
 InitSimulation ENDP
 
@@ -328,20 +341,89 @@ InitSimulation ENDP
 ; Preserves:
 ;   EBX, ESI, EDI
 ; Side effects:
-;   推进 SimClock；尝试接纳一个 NEW/WAIT 订单；运行当前订单 1 秒；
-;   更新页面缓存、资源分配、订单状态和就绪队列。
+;   推进 SimClock；尝试接纳所有可接纳订单；运行每个运行槽 1 秒；
+;   更新订单暂存、资源分配、订单状态和就绪队列。
 ; Notes:
-;   时间片长度写死为 2 秒；一次 tick 最多新接纳一个订单，
-;   等待订单的公平性依赖 NextAdmission 轮转扫描。
+;   时间片长度写死为 2 秒；并行槽位数量由 ParallelLimit 控制，
+;   等待订单的公平性仍依赖 NextAdmission 轮转扫描。
 ; ------------------------------------------------------------
 SimTick PROC USES ebx esi edi
     inc SimClock
 
+    invoke AdmitRunnableOrders
+    invoke FillRunningSlots
+
+    mov esi, 0
+run_slot_loop:
+    cmp esi, MAX_PARALLEL
+    jae run_slots_done
+    mov eax, esi
+    cmp eax, ParallelLimit
+    jae next_run_slot
+    mov edi, [RunningOrders+esi*4]
+    cmp edi, INVALID_ORDER
+    je next_run_slot
+
+    invoke AccessOrderPage, edi
+    dec DWORD PTR [OrderRemain+edi*4]
+    inc DWORD PTR [OrderRunTime+edi*4]
+    dec DWORD PTR [RunningSliceLeft+esi*4]
+    cmp DWORD PTR [OrderRemain+edi*4], 0
+    jg slot_not_finished
+    invoke ReleaseOrder, edi
+    invoke AddLogEvent, ADDR LogDoneA, edi
+    mov DWORD PTR [RunningOrders+esi*4], INVALID_ORDER
+    mov DWORD PTR [RunningSliceLeft+esi*4], 0
+    jmp next_run_slot
+slot_not_finished:
+    cmp DWORD PTR [RunningSliceLeft+esi*4], 0
+    jg next_run_slot
+    mov BYTE PTR [OrderState+edi], STATE_READY
+    invoke EnqueueOrder, edi
+    invoke AddLogEvent, ADDR LogRotateA, edi
+    mov DWORD PTR [RunningOrders+esi*4], INVALID_ORDER
+    mov DWORD PTR [RunningSliceLeft+esi*4], 0
+next_run_slot:
+    inc esi
+    jmp run_slot_loop
+run_slots_done:
+    invoke AdmitRunnableOrders
+    invoke FillRunningSlots
+    invoke RefreshCurrentOrder
+    cmp CurrentOrder, INVALID_ORDER
+    jne tick_done
+    cmp QueueCount, 0
+    jne tick_done
+    invoke AddLogEvent, ADDR LogIdleA, INVALID_ORDER
+tick_done:
+    ret
+SimTick ENDP
+
+; ------------------------------------------------------------
+; Proc: AdmitRunnableOrders
+; Input:
+;   无
+; Output:
+;   无
+; Clobbers:
+;   EAX, ECX, EDX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   扫描 NEW/WAIT 订单，资源和安全性满足时接纳进入就绪队列。
+; Notes:
+;   一轮 tick 会尝试所有候选订单，不再限制为最多接纳一个。
+; ------------------------------------------------------------
+AdmitRunnableOrders PROC USES ebx esi edi
+    LOCAL scanBase:DWORD
+
+    mov eax, NextAdmission
+    mov scanBase, eax
     mov esi, 0
 admit_scan:
     cmp esi, ORDER_COUNT
     jae admit_done
-    mov eax, NextAdmission
+    mov eax, scanBase
     add eax, esi
     xor edx, edx
     mov ebx, ORDER_COUNT
@@ -358,41 +440,118 @@ admit_scan:
         mov ebx, ORDER_COUNT
         div ebx
         mov NextAdmission, edx
-        jmp admit_done
     .endif
 no_admit:
     inc esi
     jmp admit_scan
 admit_done:
+    ret
+AdmitRunnableOrders ENDP
 
-    cmp CurrentOrder, INVALID_ORDER
-    jne have_current
+; ------------------------------------------------------------
+; Proc: FillRunningSlots
+; Input:
+;   无
+; Output:
+;   无
+; Clobbers:
+;   EAX, ECX, EDX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   从就绪队列取订单填充空运行槽，最多到 ParallelLimit。
+; ------------------------------------------------------------
+FillRunningSlots PROC USES esi
+    mov esi, 0
+fill_slot_loop:
+    cmp esi, MAX_PARALLEL
+    jae fill_done
+    mov eax, esi
+    cmp eax, ParallelLimit
+    jae fill_done
+    cmp DWORD PTR [RunningOrders+esi*4], INVALID_ORDER
+    jne next_fill_slot
     invoke DequeueOrder
     cmp eax, INVALID_ORDER
-    je tick_done
-    mov CurrentOrder, eax
-    mov SliceLeft, 2
+    je fill_done
+    mov [RunningOrders+esi*4], eax
+    mov DWORD PTR [RunningSliceLeft+esi*4], 2
     mov BYTE PTR [OrderState+eax], STATE_RUN
-have_current:
-    mov esi, CurrentOrder
-    invoke AccessOrderPage, esi
-    dec DWORD PTR [OrderRemain+esi*4]
-    inc DWORD PTR [OrderRunTime+esi*4]
-    dec SliceLeft
-    cmp DWORD PTR [OrderRemain+esi*4], 0
-    jg not_finished
-    invoke ReleaseOrder, esi
-    mov CurrentOrder, INVALID_ORDER
-    jmp tick_done
-not_finished:
-    cmp SliceLeft, 0
-    jg tick_done
-    mov BYTE PTR [OrderState+esi], STATE_READY
-    invoke EnqueueOrder, esi
-    mov CurrentOrder, INVALID_ORDER
-tick_done:
+    invoke AddLogEvent, ADDR LogRunA, eax
+next_fill_slot:
+    inc esi
+    jmp fill_slot_loop
+fill_done:
+    invoke RefreshCurrentOrder
     ret
-SimTick ENDP
+FillRunningSlots ENDP
+
+; ------------------------------------------------------------
+; Proc: ClampRunningSlots
+; Input:
+;   无
+; Output:
+;   无
+; Clobbers:
+;   EAX, ECX, EDX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   并行度调小时，把超出槽位的运行订单放回就绪队列。
+; ------------------------------------------------------------
+ClampRunningSlots PROC USES esi edi
+    mov esi, ParallelLimit
+clamp_loop:
+    cmp esi, MAX_PARALLEL
+    jae clamp_done
+    mov edi, [RunningOrders+esi*4]
+    cmp edi, INVALID_ORDER
+    je next_clamp_slot
+    mov BYTE PTR [OrderState+edi], STATE_READY
+    invoke EnqueueOrder, edi
+    invoke AddLogEvent, ADDR LogRotateA, edi
+    mov DWORD PTR [RunningOrders+esi*4], INVALID_ORDER
+    mov DWORD PTR [RunningSliceLeft+esi*4], 0
+next_clamp_slot:
+    inc esi
+    jmp clamp_loop
+clamp_done:
+    ret
+ClampRunningSlots ENDP
+
+; ------------------------------------------------------------
+; Proc: RefreshCurrentOrder
+; Input:
+;   无
+; Output:
+;   无
+; Clobbers:
+;   EAX, ECX, EDX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   用第一个运行槽刷新旧 UI 使用的 CurrentOrder/SliceLeft 镜像。
+; ------------------------------------------------------------
+RefreshCurrentOrder PROC USES esi
+    mov CurrentOrder, INVALID_ORDER
+    mov SliceLeft, 0
+    mov esi, 0
+refresh_loop:
+    cmp esi, MAX_PARALLEL
+    jae refresh_done
+    mov eax, [RunningOrders+esi*4]
+    cmp eax, INVALID_ORDER
+    je next_refresh_slot
+    mov CurrentOrder, eax
+    mov eax, [RunningSliceLeft+esi*4]
+    mov SliceLeft, eax
+    ret
+next_refresh_slot:
+    inc esi
+    jmp refresh_loop
+refresh_done:
+    ret
+RefreshCurrentOrder ENDP
 
 ; ------------------------------------------------------------
 ; Proc: EnqueueOrder

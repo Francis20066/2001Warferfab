@@ -17,7 +17,7 @@
 ;o888o        d888b    `Y888""8o o888o o888o `Y8bod8P' o888o 8""888P'            `8'       `Y8bod8P' d888b         o888o Y8P  `Y8bd8P'  
                                                                                                                                        
                                                                                                                                                                                                                                                                            
-; FIFO/LRU 页面置换仿真和缓存可视化。
+; 订单暂存区可视化。
 
 ; ------------------------------------------------------------
 ; Proc: DrawBuffer
@@ -25,15 +25,15 @@
 ;   hdc             = 绘制目标
 ;   lft,tp,rgt,btm = 缓存面板矩形
 ; Output:
-;   无；绘制 4x4 FIFO 缓存帧和 FIFO/LRU 命中/缺页计数
+;   无；绘制 4x4 订单暂存区和占用计数
 ; Clobbers:
 ;   EAX, ECX, EDX
 ; Preserves:
 ;   EBX, ESI, EDI
 ; Side effects:
-;   读取 FifoFrames/FifoHits/FifoFaults/LruHits/LruFaults；复用 PageBuffer/NumBuffer。
+;   读取 ReadyQueue/QueueHead/QueueCount；复用 NumBuffer。
 ; Notes:
-;   可视化网格只展示 FIFO 帧；LRU 只展示统计数字，不展示 LruFrames 的具体内容。
+;   暂存区只表示等待调度的订单；订单进入运行槽后从队列出队，不再占用这里。
 ; ------------------------------------------------------------
 DrawBuffer PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:DWORD
     LOCAL gridL:DWORD
@@ -100,15 +100,21 @@ col_loop:
     invoke FillRect, hdc, ADDR rc, hBrush
     invoke DeleteObject, hBrush
     invoke Rectangle, hdc, x1, y1, x2, y2
-    mov esi, idx
-    movzx eax, BYTE PTR [FifoFrames+esi]
+    mov eax, idx
+    cmp eax, QueueCount
+    jae frame_empty
+    mov ebx, QueueHead
+    add ebx, eax
+    and ebx, QUEUE_SIZE - 1
+    movzx eax, BYTE PTR [ReadyQueue+ebx]
     cmp eax, 0FFh
-    jne frame_has_page
+    je frame_empty
+    mov eax, [OrderIdPtrs+eax*4]
+    invoke DrawCellA, hdc, eax, x1, y1, x2, y2
+    jmp frame_label_done
+frame_empty:
     invoke DrawCellA, hdc, ADDR DashTextA, x1, y1, x2, y2
     jmp frame_label_done
-frame_has_page:
-    invoke wsprintfA, ADDR PageBuffer, ADDR FmtPage, eax
-    invoke DrawCellA, hdc, ADDR PageBuffer, x1, y1, x2, y2
 frame_label_done:
 
     inc idx
@@ -138,9 +144,9 @@ frame_label_done:
     mov eax, y1
     add eax, 24
     mov y2, eax
-    mov eax, FifoHits
-    mov ebx, FifoFaults
-    invoke wsprintfA, ADDR NumBuffer, ADDR FmtFifo, eax, ebx
+    mov eax, QueueCount
+    mov ebx, QUEUE_SIZE
+    invoke wsprintfA, ADDR NumBuffer, ADDR FmtBufferUsed, eax, ebx
     invoke DrawCellA, hdc, ADDR NumBuffer, x1, y1, x2, y2
     mov eax, y2
     add eax, 8
@@ -148,10 +154,14 @@ frame_label_done:
     mov eax, y1
     add eax, 24
     mov y2, eax
-    mov eax, LruHits
-    mov ebx, LruFaults
-    invoke wsprintfA, ADDR NumBuffer, ADDR FmtLru, eax, ebx
-    invoke DrawCellA, hdc, ADDR NumBuffer, x1, y1, x2, y2
+    invoke DrawCellA, hdc, ADDR BufferRuleA, x1, y1, x2, y2
+    mov eax, y2
+    add eax, 8
+    mov y1, eax
+    mov eax, y1
+    add eax, 24
+    mov y2, eax
+    invoke DrawCellA, hdc, ADDR BufferRunRuleA, x1, y1, x2, y2
     ret
 DrawBuffer ENDP
 

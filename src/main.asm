@@ -69,8 +69,18 @@ DrawSchedule   PROTO :HDC, :DWORD, :DWORD, :DWORD, :DWORD
 DrawBuffer     PROTO :HDC, :DWORD, :DWORD, :DWORD, :DWORD
 DrawLogs       PROTO :HDC, :DWORD, :DWORD, :DWORD, :DWORD
 AddLogEvent    PROTO :DWORD, :DWORD
+LoadOrdersFromCsv PROTO
+UpdateOrderPageCount PROTO
 InitSimulation PROTO
 SimTick        PROTO
+AdmitRunnableOrders PROTO
+FillRunningSlots PROTO
+CreateParallelControls PROTO :HWND
+LayoutParallelControls PROTO :HWND
+CreateOrderPageControls PROTO :HWND
+LayoutOrderPageControls PROTO :HWND
+ClampRunningSlots PROTO
+RefreshCurrentOrder PROTO
 TryAdmitOrder  PROTO :DWORD
 BankerSafe     PROTO
 EnqueueOrder   PROTO :DWORD
@@ -82,9 +92,14 @@ GetPriorityText PROTO :DWORD
 GetSchedRowText PROTO :DWORD
 
 ID_TIMER       equ 1001
-ORDER_COUNT    equ 6
+ORDER_COUNT    equ 50
+DEFAULT_ORDER_COUNT equ 6
+ORDERS_PER_PAGE equ 6
+ORDER_ID_LEN   equ 16
+ORDER_CSV_BUFFER_SIZE equ 8192
 RES_COUNT      equ 3
-QUEUE_SIZE     equ 16
+MAX_PARALLEL   equ 5
+QUEUE_SIZE     equ 64
 CACHE_SIZE     equ 16
 LOG_COUNT      equ 4
 LOG_LINE_LEN   equ 96
@@ -101,6 +116,14 @@ MENU_SCHEDULE  equ 2004
 MENU_MEMORY    equ 2005
 MENU_VIEW      equ 2006
 MENU_HELP      equ 2007
+CTRL_PARALLEL_LABEL equ 3000
+CTRL_PARALLEL_1     equ 3001
+CTRL_PARALLEL_2     equ 3002
+CTRL_PARALLEL_3     equ 3003
+CTRL_PARALLEL_4     equ 3004
+CTRL_PARALLEL_5     equ 3005
+CTRL_ORDER_PREV     equ 3010
+CTRL_ORDER_NEXT     equ 3011
 
 .data
 include states.asm
@@ -207,15 +230,53 @@ WndProc PROC hWnd:HWND, uMsg:UINT, wParam:WPARAM, lParam:LPARAM
 
     .if uMsg == WM_CREATE
         invoke InitSimulation
+        invoke CreateParallelControls, hWnd
+        invoke CreateOrderPageControls, hWnd
         invoke SetTimer, hWnd, ID_TIMER, 1000, NULL
         xor eax, eax
         ret
+    .elseif uMsg == WM_COMMAND
+        mov eax, wParam
+        and eax, 0FFFFh
+        .if eax >= CTRL_PARALLEL_1 && eax <= CTRL_PARALLEL_5
+            push eax
+            sub eax, CTRL_PARALLEL_1
+            inc eax
+            mov ParallelLimit, eax
+            pop eax
+            invoke CheckRadioButton, hWnd, CTRL_PARALLEL_1, CTRL_PARALLEL_5, eax
+            invoke ClampRunningSlots
+            invoke RefreshCurrentOrder
+            invoke InvalidateRect, hWnd, NULL, FALSE
+            xor eax, eax
+            ret
+        .elseif eax == CTRL_ORDER_PREV
+            cmp OrderPage, 0
+            jbe order_prev_done
+            dec OrderPage
+order_prev_done:
+            invoke InvalidateRect, hWnd, NULL, FALSE
+            xor eax, eax
+            ret
+        .elseif eax == CTRL_ORDER_NEXT
+            mov eax, OrderPage
+            inc eax
+            cmp eax, OrderPageCount
+            jae order_next_done
+            mov OrderPage, eax
+order_next_done:
+            invoke InvalidateRect, hWnd, NULL, FALSE
+            xor eax, eax
+            ret
+        .endif
     .elseif uMsg == WM_TIMER
         invoke SimTick
         invoke InvalidateRect, hWnd, NULL, FALSE
         xor eax, eax
         ret
     .elseif uMsg == WM_SIZE
+        invoke LayoutParallelControls, hWnd
+        invoke LayoutOrderPageControls, hWnd
         invoke InvalidateRect, hWnd, NULL, TRUE
         xor eax, eax
         ret

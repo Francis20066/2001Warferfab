@@ -183,6 +183,88 @@ PaintUI PROC USES ebx esi edi hWnd:HWND, hdc:HDC
 PaintUI ENDP
 
 ; ------------------------------------------------------------
+; Proc: CreateParallelControls
+; Input:
+;   hWnd = 主窗口句柄
+; Output:
+;   无
+; Clobbers:
+;   EAX, ECX, EDX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   创建并行度 checkbox 组，默认选中 1。
+; ------------------------------------------------------------
+CreateParallelControls PROC USES ebx esi hWnd:HWND
+    invoke CreateWindowExW, 0, ADDR StaticClassW, ADDR ParallelLabelW, \
+        WS_CHILD or WS_VISIBLE, 0, 0, 70, 22, hWnd, CTRL_PARALLEL_LABEL, hInstance, NULL
+    mov hParallelLabel, eax
+
+    mov esi, 0
+create_parallel_loop:
+    cmp esi, MAX_PARALLEL
+    jae create_parallel_done
+    mov eax, [ParallelBtnTextPtrs+esi*4]
+    mov ebx, CTRL_PARALLEL_1
+    add ebx, esi
+    invoke CreateWindowExW, 0, ADDR ButtonClassW, eax, \
+        WS_CHILD or WS_VISIBLE or BS_AUTOCHECKBOX, 0, 0, 28, 22, hWnd, ebx, hInstance, NULL
+    mov [hParallelBtns+esi*4], eax
+    inc esi
+    jmp create_parallel_loop
+create_parallel_done:
+    invoke CheckRadioButton, hWnd, CTRL_PARALLEL_1, CTRL_PARALLEL_5, CTRL_PARALLEL_1
+    invoke LayoutParallelControls, hWnd
+    ret
+CreateParallelControls ENDP
+
+; ------------------------------------------------------------
+; Proc: LayoutParallelControls
+; Input:
+;   hWnd = 主窗口句柄
+; Output:
+;   无
+; Clobbers:
+;   EAX, ECX, EDX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   根据窗口宽度移动并行度控件。
+; ------------------------------------------------------------
+LayoutParallelControls PROC USES esi hWnd:HWND
+    LOCAL rc:RECT
+    LOCAL x:DWORD
+    LOCAL y:DWORD
+
+    cmp hParallelLabel, 0
+    je layout_parallel_done
+
+    invoke GetClientRect, hWnd, ADDR rc
+    mov eax, rc.right
+    sub eax, 520
+    cmp eax, 300
+    jge have_parallel_x
+    mov eax, 300
+have_parallel_x:
+    mov x, eax
+    mov y, 28
+
+    invoke MoveWindow, hParallelLabel, x, y, 72, 22, TRUE
+    add x, 74
+    mov esi, 0
+layout_btn_loop:
+    cmp esi, MAX_PARALLEL
+    jae layout_parallel_done
+    mov eax, [hParallelBtns+esi*4]
+    invoke MoveWindow, eax, x, y, 30, 22, TRUE
+    add x, 32
+    inc esi
+    jmp layout_btn_loop
+layout_parallel_done:
+    ret
+LayoutParallelControls ENDP
+
+; ------------------------------------------------------------
 ; Proc: DrawPanel
 ; Input:
 ;   hdc             = 绘制目标

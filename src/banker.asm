@@ -35,7 +35,13 @@
 ;   RES_COUNT 改变时，这里三类资源的手写代码必须同步扩展。
 ; ------------------------------------------------------------
 TryAdmitOrder PROC USES ebx esi edi orderIndex:DWORD
+    LOCAL prevState:DWORD
+
     mov esi, orderIndex
+    movzx eax, BYTE PTR [OrderState+esi]
+    mov prevState, eax
+    cmp QueueCount, QUEUE_SIZE
+    jae deny_admit
     mov ebx, esi
     lea ebx, [ebx+ebx*2]
 
@@ -74,14 +80,23 @@ TryAdmitOrder PROC USES ebx esi edi orderIndex:DWORD
     add [ResAvail+2], al
     mov BYTE PTR [OrderAlloc+ebx+2], 0
     mov BYTE PTR [OrderState+esi], STATE_WAIT
+    cmp prevState, STATE_WAIT
+    je unsafe_log_done
+    invoke AddLogEvent, ADDR LogWaitSafeA, esi
+unsafe_log_done:
     xor eax, eax
     ret
 safe_admit:
     invoke EnqueueOrder, esi
+    invoke AddLogEvent, ADDR LogAdmitA, esi
     mov eax, 1
     ret
 deny_admit:
     mov BYTE PTR [OrderState+esi], STATE_WAIT
+    cmp prevState, STATE_WAIT
+    je deny_log_done
+    invoke AddLogEvent, ADDR LogWaitResA, esi
+deny_log_done:
     xor eax, eax
     ret
 TryAdmitOrder ENDP
@@ -225,5 +240,6 @@ ReleaseOrder PROC USES ebx esi orderIndex:DWORD
     add [ResAvail+2], al
     mov BYTE PTR [OrderAlloc+ebx+2], 0
     mov BYTE PTR [OrderState+esi], STATE_DONE
+    invoke AddLogEvent, ADDR LogDoneA, esi
     ret
 ReleaseOrder ENDP
