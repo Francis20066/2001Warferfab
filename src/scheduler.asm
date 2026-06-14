@@ -44,6 +44,7 @@ DrawSchedule PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:
     LOCAL rowH:DWORD
     LOCAL hReadyBrush:HBRUSH
     LOCAL hRunBrush:HBRUSH
+    LOCAL hDoneBrush:HBRUSH
     LOCAL rc:RECT
     LOCAL x1:DWORD
     LOCAL x2:DWORD
@@ -138,11 +139,15 @@ sched_label_y_ok:
     inc esi
     jmp sched_label_loop
 sched_labels_done:
-
+    ; 00D9A55Ch = RGB(217, 165, 92)，橙色
     invoke CreateSolidBrush, 00D9A55Ch
     mov hReadyBrush, eax
+    ; 000080FFh = RGB(0, 128, 255)，蓝色
     invoke CreateSolidBrush, 00608048h
     mov hRunBrush, eax
+    ; 0000C800h = RGB(0, 200, 0)，绿色
+    invoke CreateSolidBrush, 0000C800h
+    mov hDoneBrush, eax
 
     mov eax, SchedHistoryHead
     cmp eax, 0
@@ -199,16 +204,26 @@ sched_order_loop:
     jae sched_order_done
     mov ebx, base
     mov al, BYTE PTR [SchedHistory+ebx+esi]
+
     cmp al, STATE_READY
     je sched_fill_ready
+
     cmp al, STATE_RUN
     je sched_fill_run
+
+    cmp al, STATE_DONE
+    je sched_fill_done_state
+
     jmp sched_next_order
 sched_fill_ready:
     mov edi, hReadyBrush
     jmp sched_have_brush
 sched_fill_run:
     mov edi, hRunBrush
+    jmp sched_have_brush
+sched_fill_done_state:
+    mov edi, hDoneBrush
+    jmp sched_have_brush
 sched_have_brush:
     ; 运行块矩形 y1 = gridT + esi * rowH + 1，y2 = min(y1 + rowH - 2, gridB)
     mov eax, esi
@@ -251,6 +266,7 @@ sched_dec_slot:
 sched_fill_done:
     invoke DeleteObject, hReadyBrush
     invoke DeleteObject, hRunBrush
+    invoke DeleteObject, hDoneBrush
 
     ; 轴标签：左端 gridL - 12，中点 gridL + gridW / 2，右端 gridR
     mov eax, gridB
@@ -320,10 +336,16 @@ sched_hist_scan:
     cmp esi, OrderCount
     jae sched_hist_advance
     mov al, BYTE PTR [OrderState+esi]
+
     cmp al, STATE_READY
     je sched_hist_store
+
     cmp al, STATE_RUN
     je sched_hist_store
+
+    cmp al, STATE_DONE
+    je sched_hist_store
+
     jmp sched_hist_next
 sched_hist_store:
     mov BYTE PTR [edi+esi], al
