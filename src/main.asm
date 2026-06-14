@@ -99,7 +99,7 @@ ORDER_ID_LEN   equ 16
 ORDER_CSV_BUFFER_SIZE equ 8192
 RES_COUNT      equ 3
 MAX_PARALLEL   equ 5
-QUEUE_SIZE     equ 64
+QUEUE_SIZE     equ 16
 CACHE_SIZE     equ 16
 LOG_COUNT      equ 4
 LOG_LINE_LEN   equ 96

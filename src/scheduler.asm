@@ -364,14 +364,12 @@ run_slot_loop:
     cmp edi, INVALID_ORDER
     je next_run_slot
 
-    invoke AccessOrderPage, edi
     dec DWORD PTR [OrderRemain+edi*4]
     inc DWORD PTR [OrderRunTime+edi*4]
     dec DWORD PTR [RunningSliceLeft+esi*4]
     cmp DWORD PTR [OrderRemain+edi*4], 0
     jg slot_not_finished
     invoke ReleaseOrder, edi
-    invoke AddLogEvent, ADDR LogDoneA, edi
     mov DWORD PTR [RunningOrders+esi*4], INVALID_ORDER
     mov DWORD PTR [RunningSliceLeft+esi*4], 0
     jmp next_run_slot

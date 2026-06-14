@@ -265,6 +265,73 @@ layout_parallel_done:
 LayoutParallelControls ENDP
 
 ; ------------------------------------------------------------
+; Proc: CreateOrderPageControls
+; Input:
+;   hWnd = 主窗口句柄
+; Output:
+;   无
+; Clobbers:
+;   EAX, ECX, EDX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   创建订单分页标签和上一页/下一页按钮。
+; ------------------------------------------------------------
+CreateOrderPageControls PROC hWnd:HWND
+    invoke CreateWindowExW, 0, ADDR StaticClassW, ADDR OrderPageLabelW, \
+        WS_CHILD or WS_VISIBLE, 0, 0, 70, 22, hWnd, NULL, hInstance, NULL
+    mov hOrderPageLabel, eax
+    invoke CreateWindowExW, 0, ADDR ButtonClassW, ADDR PrevPageW, \
+        WS_CHILD or WS_VISIBLE, 0, 0, 28, 22, hWnd, CTRL_ORDER_PREV, hInstance, NULL
+    mov hOrderPrevBtn, eax
+    invoke CreateWindowExW, 0, ADDR ButtonClassW, ADDR NextPageW, \
+        WS_CHILD or WS_VISIBLE, 0, 0, 28, 22, hWnd, CTRL_ORDER_NEXT, hInstance, NULL
+    mov hOrderNextBtn, eax
+    invoke LayoutOrderPageControls, hWnd
+    ret
+CreateOrderPageControls ENDP
+
+; ------------------------------------------------------------
+; Proc: LayoutOrderPageControls
+; Input:
+;   hWnd = 主窗口句柄
+; Output:
+;   无
+; Clobbers:
+;   EAX, ECX, EDX
+; Preserves:
+;   EBX, ESI, EDI
+; Side effects:
+;   根据窗口宽度移动订单分页控件。
+; ------------------------------------------------------------
+LayoutOrderPageControls PROC hWnd:HWND
+    LOCAL rc:RECT
+    LOCAL x:DWORD
+    LOCAL y:DWORD
+
+    cmp hOrderPageLabel, 0
+    je layout_order_page_done
+
+    invoke GetClientRect, hWnd, ADDR rc
+    mov eax, rc.right
+    sub eax, 190
+    cmp eax, 22
+    jge have_order_page_x
+    mov eax, 22
+have_order_page_x:
+    mov x, eax
+    mov y, 52
+
+    invoke MoveWindow, hOrderPageLabel, x, y, 74, 22, TRUE
+    add x, 76
+    invoke MoveWindow, hOrderPrevBtn, x, y, 28, 22, TRUE
+    add x, 30
+    invoke MoveWindow, hOrderNextBtn, x, y, 28, 22, TRUE
+layout_order_page_done:
+    ret
+LayoutOrderPageControls ENDP
+
+; ------------------------------------------------------------
 ; Proc: DrawPanel
 ; Input:
 ;   hdc             = 绘制目标

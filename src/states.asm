@@ -59,6 +59,8 @@ FmtLru         db "LRU   hit %u  fault %u",0
 FmtBufferUsed  db "buffer used %u/%u",0
 FmtTick        db "%u",0
 FmtLog         db "T%03u  %-8s  %s",0
+FmtOrderPage   db "Page %u/%u",0
+FmtOrderId     db "ORDER%03u",0
 TimeBuffer     db 64 dup(0)
 PageBuffer     db 16 dup(0)
 TickBuffer     db 16 dup(0)
@@ -92,6 +94,9 @@ LogLine2       dw 0521Dh,059CBh,05316h,094F6h,0884Ch,05BB6h,07B97h,06CD5h,05B89h
 LogLine3       dw 08C03h,05EA6h,05668h,08FDBh,05165h,065F6h,095F4h,07247h,08F6Eh,08F6Ch,06A21h,05F0Fh,0000h
 LogLine4       dw 0751Fh,04EA7h,06682h,05B58h,0533Ah,05BB9h,091CFh,0FF1Ah,00031h,00036h,09875h,0000h
 ParallelLabelW dw 05E76h,0884Ch,05EA6h,0FF1Ah,0000h
+OrderPageLabelW dw 08BA2h,05355h,09875h,0FF1Ah,0000h
+PrevPageW      dw 0003Ch,0000h
+NextPageW      dw 0003Eh,0000h
 Num1W          dw 0031h,0000h
 Num2W          dw 0032h,0000h
 Num3W          dw 0033h,0000h
@@ -108,6 +113,10 @@ Order003       db "ORDER003",0
 Order004       db "ORDER004",0
 Order005       db "ORDER005",0
 Order006       db "ORDER006",0
+DefaultPriority db 1, 0, 2, 1, 2, 0
+DefaultNeed      db 1, 0, 2,   2, 1, 1,   0, 1, 2
+                 db 1, 2, 0,   2, 0, 2,   0, 2, 1
+DefaultTotalTime dd 10, 12, 8, 14, 9, 15
 ReadyTextA     db "READY",0
 NewTextA       db "NEW",0
 RunTextA       db "RUN",0
@@ -146,8 +155,7 @@ LogRotateA     db "time slice expired",0
 LogIdleA       db "idle: ready queue empty",0
 
 ; 显示查找表：用状态值、优先级值或设备编号直接换成字符串地址。
-OrderIdPtrs    dd OFFSET Order001, OFFSET Order002, OFFSET Order003
-               dd OFFSET Order004, OFFSET Order005, OFFSET Order006
+OrderIdPtrs    dd ORDER_COUNT dup(0)
 StatusPtrs     dd OFFSET NewTextA, OFFSET ReadyTextA, OFFSET RunTextA
                dd OFFSET DoneTextA, OFFSET WaitTextA
 PriorityPtrs   dd OFFSET P0TextA, OFFSET P1TextA, OFFSET P2TextA
@@ -158,8 +166,10 @@ ParallelBtnTextPtrs dd OFFSET Num1W, OFFSET Num2W, OFFSET Num3W
 
 
 ; 
-OrderPath       db "resource/orders",0
-OrderLoadBuffer db 1024 dup(0)
+OrderPath       db "resource/orders.csv",0
+OrderFallbackPath db "resource/orders",0
+OrderLoadBuffer db ORDER_CSV_BUFFER_SIZE dup(0)
+OrderIdStorage db ORDER_COUNT * ORDER_ID_LEN dup(0)
 
 
 
@@ -168,12 +178,14 @@ OrderLoadBuffer db 1024 dup(0)
 ;   OrderNeed/OrderAlloc 按订单连续存 3 个资源量，偏移 = orderIndex * RES_COUNT。
 ;   ReadyQueue 是环形队列，QUEUE_SIZE 必须是 2 的幂，因为入队/出队用 and 做取模。
 ;   0FFh 表示空缓存帧/空队列槽；INVALID_ORDER 表示当前没有运行订单。
+OrderCount     dd DEFAULT_ORDER_COUNT
+OrderPage      dd 0
+OrderPageCount dd 1
 OrderState     db ORDER_COUNT dup(STATE_NEW)
-OrderPriority  db 1, 0, 2, 1, 2, 0
-OrderNeed      db 1, 0, 2,   2, 1, 1,   0, 1, 2
-               db 1, 2, 0,   2, 0, 2,   0, 2, 1
+OrderPriority  db ORDER_COUNT dup(0)
+OrderNeed      db ORDER_COUNT * RES_COUNT dup(0)
 OrderAlloc     db ORDER_COUNT * RES_COUNT dup(0)
-OrderTotalTime dd 10, 12, 8, 14, 9, 15
+OrderTotalTime dd ORDER_COUNT dup(0)
 OrderRemain    dd ORDER_COUNT dup(0)
 OrderRunTime   dd ORDER_COUNT dup(0)
 ResTotal       db 5, 4, 6
@@ -192,6 +204,10 @@ NextAdmission  dd 0
 SimClock       dd 0
 hParallelLabel dd 0
 hParallelBtns  dd MAX_PARALLEL dup(0)
+hOrderPageLabel dd 0
+hOrderPrevBtn  dd 0
+hOrderNextBtn  dd 0
+SafeFinish     db ORDER_COUNT dup(0)
 
 FifoFrames     db CACHE_SIZE dup(0FFh)
 FifoCursor     dd 0

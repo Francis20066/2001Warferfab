@@ -33,7 +33,7 @@
 ; Side effects:
 ;   读取 OrderState/OrderNeed/OrderRemain 等全局状态；复用 NumBuffer 格式化数字。
 ; Notes:
-;   假设 ORDER_COUNT 为 6，网格为 7 行；改订单数量时要同步表格行数。
+;   表格固定每页显示 ORDERS_PER_PAGE 条，OrderPage 控制当前页。
 ; ------------------------------------------------------------
 DrawOrderTable PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:DWORD
     LOCAL gx1:DWORD
@@ -46,8 +46,26 @@ DrawOrderTable PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, bt
     LOCAL x2:DWORD
     LOCAL y1:DWORD
     LOCAL y2:DWORD
+    LOCAL pageStart:DWORD
 
     invoke DrawPanel, hdc, lft, tp, rgt, btm, ADDR OrderListText
+    mov eax, OrderPage
+    inc eax
+    invoke wsprintfA, ADDR PageBuffer, ADDR FmtOrderPage, eax, OrderPageCount
+    mov eax, rgt
+    sub eax, 112
+    mov x1, eax
+    mov eax, rgt
+    sub eax, 8
+    mov x2, eax
+    mov eax, tp
+    add eax, 4
+    mov y1, eax
+    mov eax, tp
+    add eax, 22
+    mov y2, eax
+    invoke DrawCellA, hdc, ADDR PageBuffer, x1, y1, x2, y2
+
     mov eax, lft
     add eax, 10
     mov gx1, eax
@@ -112,9 +130,13 @@ DrawOrderTable PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, bt
     m2m x2, gx2
     invoke DrawCellW, hdc, ADDR NeedTimeText, x1, y1, x2, y2
 
+    mov eax, OrderPage
+    mov ebx, ORDERS_PER_PAGE
+    mul ebx
+    mov pageStart, eax
     mov esi, 0
 order_row_loop:
-    cmp esi, ORDER_COUNT
+    cmp esi, ORDERS_PER_PAGE
     jae order_rows_done
     mov eax, esi
     inc eax
@@ -124,18 +146,23 @@ order_row_loop:
     add eax, rh
     mov y2, eax
 
+    mov edi, pageStart
+    add edi, esi
+    cmp edi, OrderCount
+    jae order_row_empty
+
     m2m x1, gx1
     mov eax, x1
     add eax, cw
     mov x2, eax
-    mov eax, [OrderIdPtrs+esi*4]
+    mov eax, [OrderIdPtrs+edi*4]
     invoke DrawCellA, hdc, eax, x1, y1, x2, y2
 
     m2m x1, x2
     mov eax, x1
     add eax, cw
     mov x2, eax
-    movzx eax, BYTE PTR [OrderState+esi]
+    movzx eax, BYTE PTR [OrderState+edi]
     invoke GetStatusText, eax
     invoke DrawCellA, hdc, eax, x1, y1, x2, y2
 
@@ -143,11 +170,11 @@ order_row_loop:
     mov eax, x1
     add eax, cw
     mov x2, eax
-    movzx eax, BYTE PTR [OrderPriority+esi]
+    movzx eax, BYTE PTR [OrderPriority+edi]
     invoke GetPriorityText, eax
     invoke DrawCellA, hdc, eax, x1, y1, x2, y2
 
-    mov ebx, esi
+    mov ebx, edi
     lea ebx, [ebx+ebx*2]
     m2m x1, x2
     mov eax, x1
@@ -175,10 +202,18 @@ order_row_loop:
 
     m2m x1, x2
     m2m x2, gx2
-    mov eax, [OrderRemain+esi*4]
+    mov eax, [OrderRemain+edi*4]
     invoke wsprintfA, ADDR NumBuffer, ADDR FmtSec, eax
     invoke DrawCellA, hdc, ADDR NumBuffer, x1, y1, x2, y2
 
+    jmp order_row_next
+order_row_empty:
+    m2m x1, gx1
+    mov eax, x1
+    add eax, cw
+    mov x2, eax
+    invoke DrawCellA, hdc, ADDR DashTextA, x1, y1, x2, y2
+order_row_next:
     inc esi
     jmp order_row_loop
 order_rows_done:

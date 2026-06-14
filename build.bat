@@ -9,15 +9,19 @@ if not exist "%MASM32%\bin\ml.exe" (
   exit /b 1
 )
 
+if not exist "%ROOT%\build" (
+  mkdir "%ROOT%\build"
+)
+
 pushd "%SystemDrive%\"
 
-"%MASM32%\bin\ml.exe" /c /coff /Cp /nologo /I "%ROOT%\src" /Fo"%ROOT%\main.obj" "%ROOT%\src\main.asm"
+"%MASM32%\bin\ml.exe" /c /coff /Cp /nologo /I "%ROOT%\src" /Fo"%ROOT%\build\main.obj" "%ROOT%\src\main.asm"
 if errorlevel 1 (
   popd
   exit /b 1
 )
 
-"%MASM32%\bin\link.exe" /SUBSYSTEM:WINDOWS /nologo /OUT:"%ROOT%\main.exe" "%ROOT%\main.obj"
+"%MASM32%\bin\link.exe" /SUBSYSTEM:WINDOWS /nologo /OUT:"%ROOT%\build\WaferFab.exe" "%ROOT%\build\main.obj"
 if errorlevel 1 (
   popd
   exit /b 1
@@ -25,12 +29,5 @@ if errorlevel 1 (
 
 popd
 
-if not exist build (
-  mkdir build
-)
-
-move main.exe build\main.exe
-if exist build\WaferFab.exe del build\WaferFab.exe
-ren build\main.exe WaferFab.exe
-del main.obj
+del "%ROOT%\build\main.obj"
 echo Built WaferFab.exe
