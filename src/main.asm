@@ -239,10 +239,12 @@ WndProc PROC hWnd:HWND, uMsg:UINT, wParam:WPARAM, lParam:LPARAM
         xor eax, eax
         ret
     .elseif uMsg == WM_COMMAND
+        ; commandId = LOWORD(wParam)
         mov eax, wParam
         and eax, 0FFFFh
         .if eax >= CTRL_PARALLEL_1 && eax <= CTRL_PARALLEL_5
             push eax
+            ; ParallelLimit = commandId - CTRL_PARALLEL_1 + 1
             sub eax, CTRL_PARALLEL_1
             inc eax
             mov ParallelLimit, eax
@@ -263,6 +265,7 @@ order_prev_done:
             xor eax, eax
             ret
         .elseif eax == CTRL_ORDER_NEXT
+            ; nextPage = OrderPage + 1；仅当 nextPage < OrderPageCount 时翻页
             mov eax, OrderPage
             inc eax
             cmp eax, OrderPageCount

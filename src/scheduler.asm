@@ -56,6 +56,7 @@ DrawSchedule PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:
     LOCAL base:DWORD
 
     invoke DrawPanel, hdc, lft, tp, rgt, btm, ADDR SchedText
+    ; 标题说明区域：textL = lft + 12, textR = rgt - 12
     mov eax, lft
     add eax, 12
     mov textL, eax
@@ -75,6 +76,7 @@ DrawSchedule PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:
     mov y2, eax
     invoke DrawCellW, hdc, ADDR SliceText, textL, y1, textR, y2
 
+    ; 时间轴网格 = (lft + 86, tp + 74, rgt - 14, btm - 30)
     mov eax, lft
     add eax, 86
     mov gridL, eax
@@ -90,9 +92,11 @@ DrawSchedule PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:
     cmp OrderCount, 0
     je draw_schedule_done
     invoke DrawGrid, hdc, gridL, gridT, gridR, gridB, 6, OrderCount
+    ; gridW = gridR - gridL
     mov eax, gridR
     sub eax, gridL
     mov gridW, eax
+    ; rowH = max((gridB - gridT) / OrderCount, 1)
     mov eax, gridB
     sub eax, gridT
     xor edx, edx
@@ -107,6 +111,7 @@ have_sched_row_h:
     mov eax, lft
     add eax, 12
     mov textL, eax
+    ; 订单标签右边界 textR = gridL - 6
     mov eax, gridL
     sub eax, 6
     mov textR, eax
@@ -115,6 +120,7 @@ have_sched_row_h:
 sched_label_loop:
     cmp esi, OrderCount
     jae sched_labels_done
+    ; 第 esi 个订单标签：y1 = gridT + esi * rowH，y2 = min(y1 + rowH, gridB)
     mov eax, esi
     mul rowH
     add eax, gridT
@@ -143,6 +149,7 @@ sched_labels_done:
     jne sched_have_prev_slot
     mov eax, SCHED_HISTORY_SECONDS
 sched_have_prev_slot:
+    ; slot = (SchedHistoryHead - 1 + SCHED_HISTORY_SECONDS) % SCHED_HISTORY_SECONDS
     dec eax
     mov slot, eax
     mov age, 0
@@ -151,6 +158,8 @@ sched_age_loop:
     cmp eax, SchedHistoryCount
     jae sched_fill_done
 
+    ; 从右向左画历史：x2 = gridR - age * gridW / 60
+    ; x1 = gridR - (age + 1) * gridW / 60
     mov eax, age
     mul gridW
     mov ebx, SCHED_HISTORY_SECONDS
@@ -178,6 +187,7 @@ sched_x1_ok:
     inc eax
     mov x2, eax
 sched_x_ok:
+    ; base = slot * ORDER_COUNT
     mov eax, slot
     mov ebx, ORDER_COUNT
     mul ebx
@@ -200,6 +210,7 @@ sched_fill_ready:
 sched_fill_run:
     mov edi, hRunBrush
 sched_have_brush:
+    ; 运行块矩形 y1 = gridT + esi * rowH + 1，y2 = min(y1 + rowH - 2, gridB)
     mov eax, esi
     mul rowH
     add eax, gridT
@@ -232,6 +243,7 @@ sched_order_done:
     jne sched_dec_slot
     mov eax, SCHED_HISTORY_SECONDS
 sched_dec_slot:
+    ; slot = (slot - 1 + SCHED_HISTORY_SECONDS) % SCHED_HISTORY_SECONDS
     dec eax
     mov slot, eax
     inc age
@@ -240,6 +252,7 @@ sched_fill_done:
     invoke DeleteObject, hReadyBrush
     invoke DeleteObject, hRunBrush
 
+    ; 轴标签：左端 gridL - 12，中点 gridL + gridW / 2，右端 gridR
     mov eax, gridB
     add eax, 4
     mov y1, eax
@@ -286,6 +299,7 @@ DrawSchedule ENDP
 ;   写 SchedHistory/SchedHistoryHead/SchedHistoryCount。
 ; ------------------------------------------------------------
 RecordScheduleHistory PROC USES ebx esi edi
+    ; 写入地址 = SchedHistory + SchedHistoryHead * ORDER_COUNT
     mov eax, SchedHistoryHead
     mov ebx, ORDER_COUNT
     mul ebx
@@ -318,6 +332,7 @@ sched_hist_next:
     jmp sched_hist_scan
 
 sched_hist_advance:
+    ; SchedHistoryHead = (SchedHistoryHead + 1) % SCHED_HISTORY_SECONDS
     mov eax, SchedHistoryHead
     inc eax
     cmp eax, SCHED_HISTORY_SECONDS
@@ -325,6 +340,7 @@ sched_hist_advance:
     xor eax, eax
 sched_hist_head_ok:
     mov SchedHistoryHead, eax
+    ; SchedHistoryCount = min(SchedHistoryCount + 1, SCHED_HISTORY_SECONDS)
     mov eax, SchedHistoryCount
     cmp eax, SCHED_HISTORY_SECONDS
     jae sched_hist_done
@@ -360,6 +376,7 @@ init_orders:
     mov [OrderRemain+esi*4], eax
     mov DWORD PTR [OrderRunTime+esi*4], 0
     mov ebx, esi
+    ; ebx = esi * RES_COUNT = esi * 3
     lea ebx, [ebx+ebx*2]
     mov BYTE PTR [OrderAlloc+ebx], 0
     mov BYTE PTR [OrderAlloc+ebx+1], 0
@@ -382,7 +399,9 @@ max_order_loop:
     cmp esi, OrderCount
     jae max_done
     mov ebx, esi
+    ; ebx = esi * RES_COUNT = esi * 3
     lea ebx, [ebx+ebx*2]
+    ; ResMaxDemand[i] = sum(OrderNeed[order][i])
     mov al, [OrderNeed+ebx]
     add BYTE PTR [ResMaxDemand], al
     mov al, [OrderNeed+ebx+1]
@@ -404,6 +423,7 @@ max_done:
 init_running_slots:
     cmp esi, MAX_PARALLEL
     jae init_running_done
+    ; RunningOrders[esi] = INVALID_ORDER，RunningSliceLeft[esi] = 0
     mov DWORD PTR [RunningOrders+esi*4], INVALID_ORDER
     mov DWORD PTR [RunningSliceLeft+esi*4], 0
     inc esi
@@ -424,6 +444,7 @@ init_running_done:
 init_queue_cache:
     cmp esi, CACHE_SIZE
     jae init_cache_done
+    ; FifoFrames[esi] = LruFrames[esi] = 空帧，LruAge[esi] = 0
     mov BYTE PTR [FifoFrames+esi], 0FFh
     mov BYTE PTR [LruFrames+esi], 0FFh
     mov DWORD PTR [LruAge+esi*4], 0
@@ -472,6 +493,7 @@ InitSimulation ENDP
 ;   本 tick 新接纳的订单留在暂存区，下一 tick 才会被调度，便于可视化等待状态。
 ; ------------------------------------------------------------
 SimTick PROC USES ebx esi edi
+    ; SimClock = SimClock + 1
     inc SimClock
 
     invoke FillRunningSlots
@@ -484,16 +506,19 @@ run_slot_loop:
     mov eax, esi
     cmp eax, ParallelLimit
     jae next_run_slot
+    ; edi = RunningOrders[esi]
     mov edi, [RunningOrders+esi*4]
     cmp edi, INVALID_ORDER
     je next_run_slot
 
+    ; 每 tick：剩余时间 -1，已运行时间 +1，当前时间片剩余 -1
     dec DWORD PTR [OrderRemain+edi*4]
     inc DWORD PTR [OrderRunTime+edi*4]
     dec DWORD PTR [RunningSliceLeft+esi*4]
     cmp DWORD PTR [OrderRemain+edi*4], 0
     jg slot_not_finished
     invoke ReleaseOrder, edi
+    ; 清空运行槽 esi
     mov DWORD PTR [RunningOrders+esi*4], INVALID_ORDER
     mov DWORD PTR [RunningSliceLeft+esi*4], 0
     jmp next_run_slot
@@ -503,6 +528,7 @@ slot_not_finished:
     mov BYTE PTR [OrderState+edi], STATE_READY
     invoke EnqueueOrder, edi
     invoke AddLogEvent, ADDR LogRotateA, edi
+    ; 时间片轮转后清空运行槽 esi
     mov DWORD PTR [RunningOrders+esi*4], INVALID_ORDER
     mov DWORD PTR [RunningSliceLeft+esi*4], 0
 next_run_slot:
@@ -549,6 +575,7 @@ admit_scan:
     xor edx, edx
     mov ebx, OrderCount
     div ebx
+    ; edi = (scanBase + esi) % OrderCount
     mov edi, edx
     movzx eax, BYTE PTR [OrderState+edi]
     .if eax == STATE_NEW || eax == STATE_WAIT
@@ -560,6 +587,7 @@ admit_scan:
         xor edx, edx
         mov ebx, OrderCount
         div ebx
+        ; NextAdmission = (edi + 1) % OrderCount
         mov NextAdmission, edx
     .endif
 no_admit:
@@ -590,11 +618,13 @@ fill_slot_loop:
     mov eax, esi
     cmp eax, ParallelLimit
     jae fill_done
+    ; 检查 RunningOrders[esi]
     cmp DWORD PTR [RunningOrders+esi*4], INVALID_ORDER
     jne next_fill_slot
     invoke DequeueOrder
     cmp eax, INVALID_ORDER
     je fill_done
+    ; RunningOrders[esi] = 出队订单，RunningSliceLeft[esi] = 2
     mov [RunningOrders+esi*4], eax
     mov DWORD PTR [RunningSliceLeft+esi*4], 2
     mov BYTE PTR [OrderState+eax], STATE_RUN
@@ -625,12 +655,14 @@ ClampRunningSlots PROC USES esi edi
 clamp_loop:
     cmp esi, MAX_PARALLEL
     jae clamp_done
+    ; edi = RunningOrders[esi]
     mov edi, [RunningOrders+esi*4]
     cmp edi, INVALID_ORDER
     je next_clamp_slot
     mov BYTE PTR [OrderState+edi], STATE_READY
     invoke EnqueueOrder, edi
     invoke AddLogEvent, ADDR LogRotateA, edi
+    ; 并行度收缩后清空运行槽 esi
     mov DWORD PTR [RunningOrders+esi*4], INVALID_ORDER
     mov DWORD PTR [RunningSliceLeft+esi*4], 0
 next_clamp_slot:
@@ -660,6 +692,7 @@ RefreshCurrentOrder PROC USES esi
 refresh_loop:
     cmp esi, MAX_PARALLEL
     jae refresh_done
+    ; CurrentOrder 镜像第一个非空 RunningOrders[esi]
     mov eax, [RunningOrders+esi*4]
     cmp eax, INVALID_ORDER
     je next_refresh_slot
@@ -699,6 +732,7 @@ enqueue_has_space:
     mov ebx, QueueTail
     mov eax, orderIndex
     mov [ReadyQueue+ebx], al
+    ; QueueTail = (QueueTail + 1) % QUEUE_SIZE
     inc ebx
     and ebx, QUEUE_SIZE - 1
     mov QueueTail, ebx
@@ -730,7 +764,9 @@ EvictReadyOrder PROC USES ebx esi
 have_lru_victim:
     mov esi, eax
     mov ebx, esi
+    ; ebx = victim * RES_COUNT = victim * 3
     lea ebx, [ebx+ebx*2]
+    ; 淘汰 READY 订单：ResAvail[i] += OrderAlloc[i]，OrderAlloc[i] = 0
     mov al, [OrderAlloc+ebx]
     add [ResAvail], al
     mov BYTE PTR [OrderAlloc+ebx], 0
@@ -773,6 +809,7 @@ can_dequeue:
     mov ebx, QueueHead
     movzx eax, BYTE PTR [ReadyQueue+ebx]
     mov BYTE PTR [ReadyQueue+ebx], 0FFh
+    ; QueueHead = (QueueHead + 1) % QUEUE_SIZE
     inc ebx
     and ebx, QUEUE_SIZE - 1
     mov QueueHead, ebx
@@ -809,6 +846,7 @@ queued_row:
     cmp eax, QueueCount
     jae sched_dash
     mov ebx, QueueHead
+    ; ebx = (QueueHead + (rowIndex - 1)) % QUEUE_SIZE
     add ebx, eax
     and ebx, QUEUE_SIZE - 1
     movzx eax, BYTE PTR [ReadyQueue+ebx]

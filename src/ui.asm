@@ -64,6 +64,7 @@ PaintUI PROC USES ebx esi edi hWnd:HWND, hdc:HDC
     LOCAL remain:DWORD
 
     invoke GetClientRect, hWnd, ADDR rc
+    ; w = rc.right - rc.left, h = rc.bottom - rc.top
     mov eax, rc.right
     sub eax, rc.left
     mov w, eax
@@ -92,6 +93,7 @@ PaintUI PROC USES ebx esi edi hWnd:HWND, hdc:HDC
     mov row1Top, 12
     mov row1Bottom, 70
 
+    ; row4Top = h - 120, row4Bottom = h - 12
     mov eax, h
     sub eax, 120
     mov row4Top, eax
@@ -99,6 +101,10 @@ PaintUI PROC USES ebx esi edi hWnd:HWND, hdc:HDC
     sub eax, 12
     mov row4Bottom, eax
 
+    ; remain = row4Top - row1Bottom - 20
+    ; row2Top = row1Bottom + 10
+    ; row2Bottom = row1Bottom + 10 + remain * 45 / 100
+    ; row3Top = row2Bottom + 10, row3Bottom = row4Top - 10
     mov eax, row4Top
     sub eax, row1Bottom
     sub eax, 20
@@ -121,6 +127,7 @@ PaintUI PROC USES ebx esi edi hWnd:HWND, hdc:HDC
     sub eax, 10
     mov row3Bottom, eax
 
+    ; midX = (w - 34) / 2 + 12, rightPanelLeft = midX + 10
     mov eax, w
     sub eax, 34
     shr eax, 1
@@ -135,6 +142,7 @@ PaintUI PROC USES ebx esi edi hWnd:HWND, hdc:HDC
     invoke SetTextColor, hdc, 00242424h
     mov textLeft, 22
     mov textTop, 24
+    ; textRight = w - 250
     mov eax, w
     sub eax, 250
     mov textRight, eax
@@ -149,6 +157,7 @@ PaintUI PROC USES ebx esi edi hWnd:HWND, hdc:HDC
     movzx esi, sysTime.wSecond
     invoke wsprintfA, ADDR TimeBuffer, ADDR FmtTime, eax, ebx, ecx, edx, esi
     invoke SelectObject, hdc, hSmallFont
+    ; timeLeft = max(w - 230, 22), timeRight = w - 20
     mov eax, w
     sub eax, 230
     cmp eax, 22
@@ -165,6 +174,7 @@ time_left_ok:
 
     invoke SelectObject, hdc, hSmallFont
 
+    ; 左面板右边界 = midX；右面板右边界 = w - 12
     mov eax, midX
     invoke DrawOrderTable, hdc, 12, row2Top, eax, row2Bottom
     mov eax, w
@@ -211,11 +221,15 @@ CreateParallelControls PROC USES ebx esi hWnd:HWND
 create_parallel_loop:
     cmp esi, MAX_PARALLEL
     jae create_parallel_done
+    ; 按钮文本地址 = ParallelBtnTextPtrs[esi]，控件 ID = CTRL_PARALLEL_1 + esi
+    ; textPtr = ParallelBtnTextPtrs[esi]
     mov eax, [ParallelBtnTextPtrs+esi*4]
     mov ebx, CTRL_PARALLEL_1
+    ; controlId = CTRL_PARALLEL_1 + esi
     add ebx, esi
     invoke CreateWindowExW, 0, ADDR ButtonClassW, eax, \
         WS_CHILD or BS_AUTORADIOBUTTON, 0, 0, 38, 22, hWnd, ebx, hInstance, NULL
+    ; hParallelBtns[esi] = 新建按钮句柄
     mov [hParallelBtns+esi*4], eax
     inc esi
     jmp create_parallel_loop
@@ -227,6 +241,7 @@ create_parallel_done:
 show_parallel_loop:
     cmp esi, MAX_PARALLEL
     jae show_parallel_done
+    ; hButton = hParallelBtns[esi]
     mov eax, [hParallelBtns+esi*4]
     invoke ShowWindow, eax, SW_SHOW
     inc esi
@@ -264,9 +279,11 @@ LayoutParallelControls PROC USES esi hWnd:HWND
     je layout_parallel_done
 
     invoke GetClientRect, hWnd, ADDR rc
+    ; w = rc.right - rc.left
     mov eax, rc.right
     sub eax, rc.left
     mov w, eax
+    ; h = rc.bottom - rc.top
     mov eax, rc.bottom
     sub eax, rc.top
     mov h, eax
@@ -276,6 +293,9 @@ LayoutParallelControls PROC USES esi hWnd:HWND
     mov row3Top, 170
     jmp parallel_rows_done
 parallel_calc_rows:
+    ; row3Top 复用主布局公式：
+    ; row2Bottom = 70 + 10 + (h - 120 - 70 - 20) * 45 / 100
+    ; row3Top = row2Bottom + 10
     mov eax, h
     sub eax, 120
     mov row4Top, eax
@@ -295,6 +315,8 @@ parallel_calc_rows:
     mov row3Top, eax
 parallel_rows_done:
 
+    ; midX = (w - 34) / 2 + 12
+    ; x = max(midX - 294, 22), y = row3Top + 2
     mov eax, w
     sub eax, 34
     shr eax, 1
@@ -311,13 +333,16 @@ have_parallel_x:
     mov y, eax
 
     invoke MoveWindow, hParallelLabel, x, y, 82, 22, TRUE
+    ; 第一个按钮 x = label.x + 84；后续按钮每个右移 40
     add x, 84
     mov esi, 0
 layout_btn_loop:
     cmp esi, MAX_PARALLEL
     jae layout_parallel_done
+    ; hButton = hParallelBtns[esi]
     mov eax, [hParallelBtns+esi*4]
     invoke MoveWindow, eax, x, y, 38, 22, TRUE
+    ; x = x + 40
     add x, 40
     inc esi
     jmp layout_btn_loop
@@ -374,6 +399,7 @@ LayoutOrderPageControls PROC USES ebx hWnd:HWND
     je layout_order_page_done
 
     invoke GetClientRect, hWnd, ADDR rc
+    ; x = max((rc.right - 34) / 2 + 12 - 68, 120)
     mov eax, rc.right
     sub eax, 34
     shr eax, 1
@@ -387,6 +413,7 @@ have_order_page_x:
     mov y, 82
 
     invoke MoveWindow, hOrderPrevBtn, x, y, 28, 22, TRUE
+    ; 下一页按钮 x = 上一页按钮 x + 30
     mov eax, x
     add eax, 30
     invoke MoveWindow, hOrderNextBtn, eax, y, 28, 22, TRUE
@@ -427,6 +454,7 @@ DrawPanel PROC USES ebx hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:DWORD, pTit
     invoke FillRect, hdc, ADDR rc, hBrush
     invoke DeleteObject, hBrush
 
+    ; 标题栏矩形 bottom = tp + 24
     mov eax, tp
     add eax, 24
     invoke SetRect, ADDR rc, lft, tp, rgt, eax
@@ -445,6 +473,7 @@ DrawPanel PROC USES ebx hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:DWORD, pTit
     invoke SelectObject, hdc, hOldPen
     invoke DeleteObject, hPen
 
+    ; 标题文本矩形 = (lft + 8, tp + 4, rgt - 8, tp + 22)
     mov eax, lft
     add eax, 8
     mov tx1, eax
@@ -541,6 +570,7 @@ DrawGrid PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:DWOR
     invoke SelectObject, hdc, hPen
     mov hOldPen, eax
 
+    ; step = (rgt - lft) / cols
     mov eax, rgt
     sub eax, lft
     xor edx, edx
@@ -557,6 +587,7 @@ v_loop:
 v_draw:
     invoke MoveToEx, hdc, x, tp, NULL
     invoke LineTo, hdc, x, btm
+    ; 下一条竖线 x = x + step；最后一条强制贴到 rgt
     mov eax, i
     cmp eax, cols
     jae v_done
@@ -567,6 +598,7 @@ v_draw:
     jmp v_loop
 v_done:
 
+    ; step = (btm - tp) / rows
     mov eax, btm
     sub eax, tp
     xor edx, edx
@@ -583,6 +615,7 @@ h_loop:
 h_draw:
     invoke MoveToEx, hdc, lft, y, NULL
     invoke LineTo, hdc, rgt, y
+    ; 下一条横线 y = y + step；最后一条强制贴到 btm
     mov eax, i
     cmp eax, rows
     jae h_done
@@ -614,6 +647,7 @@ DrawGrid ENDP
 ;   日志使用 ANSI 文本，避免源码编码影响中文字符串。
 ; ------------------------------------------------------------
 AddLogEvent PROC USES ebx esi edi eventText:DWORD, orderIndex:DWORD
+    ; 日志写入地址 = LogBuffer + LogHead * LOG_LINE_LEN
     mov eax, LogHead
     mov ebx, LOG_LINE_LEN
     mul ebx
@@ -630,6 +664,7 @@ log_has_order:
 log_format:
     invoke wsprintfA, edi, ADDR FmtLog, SimClock, esi, eventText
 
+    ; LogHead = (LogHead + 1) % LOG_COUNT
     mov eax, LogHead
     inc eax
     cmp eax, LOG_COUNT
@@ -637,6 +672,7 @@ log_format:
     xor eax, eax
 log_head_ok:
     mov LogHead, eax
+    ; LogCount = min(LogCount + 1, LOG_COUNT)
     mov eax, LogCount
     cmp eax, LOG_COUNT
     jae log_done
@@ -671,6 +707,7 @@ DrawLogs PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:DWOR
     LOCAL idx:DWORD
 
     invoke DrawPanel, hdc, lft, tp, rgt, btm, ADDR LogText
+    ; 日志文本区域：x1 = lft + 18, x2 = rgt - 18, y1 = tp + 32
     mov eax, lft
     add eax, 18
     mov x1, eax
@@ -684,6 +721,7 @@ DrawLogs PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:DWOR
     sub eax, 6
     cmp eax, y1
     jbe logs_done
+    ; lineH = max((btm - 6 - y1) / LOG_COUNT, 1)
     sub eax, y1
     xor edx, edx
     mov ebx, LOG_COUNT
@@ -701,6 +739,7 @@ draw_log_loop:
     mov eax, LogCount
     cmp eax, LOG_COUNT
     jne log_not_full
+    ; 缓冲满时从 LogHead 开始：idx = (LogHead + esi) % LOG_COUNT
     mov eax, LogHead
     add eax, esi
     jmp log_wrap
@@ -712,11 +751,13 @@ log_wrap:
     sub eax, LOG_COUNT
 log_idx_ok:
     mov idx, eax
+    ; edi = LogBuffer + idx * LOG_LINE_LEN
     mov ebx, LOG_LINE_LEN
     mul ebx
     mov edi, OFFSET LogBuffer
     add edi, eax
 
+    ; y2 = y1 + lineH - 1；下一行 y1 = y1 + lineH
     mov eax, y1
     add eax, lineH
     dec eax

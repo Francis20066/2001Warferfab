@@ -49,9 +49,11 @@ DrawOrderTable PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, bt
     LOCAL pageStart:DWORD
 
     invoke DrawPanel, hdc, lft, tp, rgt, btm, ADDR OrderListText
+    ; 显示页码 = OrderPage + 1
     mov eax, OrderPage
     inc eax
     invoke wsprintfA, ADDR PageBuffer, ADDR FmtOrderPage, eax, OrderPageCount
+    ; 页码矩形 = (rgt - 172, tp + 4, rgt - 74, tp + 22)
     mov eax, rgt
     sub eax, 172
     mov x1, eax
@@ -66,6 +68,7 @@ DrawOrderTable PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, bt
     mov y2, eax
     invoke DrawCellA, hdc, ADDR PageBuffer, x1, y1, x2, y2
 
+    ; 表格区域 = (lft + 10, tp + 36, rgt - 10, btm - 10)
     mov eax, lft
     add eax, 10
     mov gx1, eax
@@ -79,12 +82,14 @@ DrawOrderTable PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, bt
     sub eax, 10
     mov gy2, eax
     invoke DrawGrid, hdc, gx1, gy1, gx2, gy2, 7, 7
+    ; cw = (gx2 - gx1) / 7
     mov eax, gx2
     sub eax, gx1
     xor edx, edx
     mov ebx, 7
     div ebx
     mov cw, eax
+    ; rh = (gy2 - gy1) / 7
     mov eax, gy2
     sub eax, gy1
     xor edx, edx
@@ -93,6 +98,7 @@ DrawOrderTable PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, bt
     mov rh, eax
 
     m2m y1, gy1
+    ; 表头 y2 = gy1 + rh；每列 x2 = x1 + cw
     mov eax, gy1
     add eax, rh
     mov y2, eax
@@ -130,6 +136,7 @@ DrawOrderTable PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, bt
     m2m x2, gx2
     invoke DrawCellW, hdc, ADDR NeedTimeText, x1, y1, x2, y2
 
+    ; pageStart = OrderPage * ORDERS_PER_PAGE
     mov eax, OrderPage
     mov ebx, ORDERS_PER_PAGE
     mul ebx
@@ -138,6 +145,7 @@ DrawOrderTable PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, bt
 order_row_loop:
     cmp esi, ORDERS_PER_PAGE
     jae order_rows_done
+    ; 第 esi 行数据区：y1 = gy1 + (esi + 1) * rh，y2 = y1 + rh
     mov eax, esi
     inc eax
     mul rh
@@ -146,6 +154,7 @@ order_row_loop:
     add eax, rh
     mov y2, eax
 
+    ; edi = pageStart + esi
     mov edi, pageStart
     add edi, esi
     cmp edi, OrderCount
@@ -175,6 +184,7 @@ order_row_loop:
     invoke DrawCellA, hdc, eax, x1, y1, x2, y2
 
     mov ebx, edi
+    ; ebx = edi * RES_COUNT = edi * 3
     lea ebx, [ebx+ebx*2]
     m2m x1, x2
     mov eax, x1
@@ -290,6 +300,7 @@ UpdateOrderPageCount PROC USES ecx esi edi
     jne have_order_count
     mov eax, 1
 have_order_count:
+    ; OrderPageCount = max((max(OrderCount, 1) + ORDERS_PER_PAGE - 1) / ORDERS_PER_PAGE, 1)
     add eax, ORDERS_PER_PAGE - 1
     xor edx, edx
     mov ebx, ORDERS_PER_PAGE
@@ -302,6 +313,7 @@ have_page_count:
     mov ebx, OrderPage
     cmp ebx, eax
     jb page_ok
+    ; OrderPage = OrderPageCount - 1
     dec eax
     mov OrderPage, eax
 page_ok:
@@ -327,6 +339,7 @@ InitOrderIdPtrs PROC USES ebx esi edi
 init_id_ptr_loop:
     cmp esi, ORDER_COUNT
     jae init_id_ptr_done
+    ; OrderIdPtrs[esi] = OrderIdStorage + esi * ORDER_ID_LEN
     mov [OrderIdPtrs+esi*4], edi
     add edi, ORDER_ID_LEN
     inc esi
@@ -355,6 +368,7 @@ SetDefaultOrders PROC USES ebx esi edi
 default_order_loop:
     cmp esi, DEFAULT_ORDER_COUNT
     jae default_order_done
+    ; edi = OrderIdPtrs[esi]，默认订单号 = esi + 1
     mov edi, [OrderIdPtrs+esi*4]
     mov eax, esi
     inc eax
@@ -363,6 +377,7 @@ default_order_loop:
     mov al, [DefaultPriority+esi]
     mov [OrderPriority+esi], al
     mov ebx, esi
+    ; ebx = esi * RES_COUNT = esi * 3
     lea ebx, [ebx+ebx*2]
     mov al, [DefaultNeed+ebx]
     mov [OrderNeed+ebx], al
@@ -412,6 +427,7 @@ csv_num_loop:
     jb csv_num_done
     cmp bl, 039h
     ja csv_num_done
+    ; eax = eax * 10 + (bl - '0')，其中 *10 拆成 *2 + *8
     mov ecx, eax
     shl eax, 1
     shl ecx, 3
@@ -438,6 +454,7 @@ csv_num_after_trim:
 csv_num_store_cursor:
     mov ebx, pOutCursor
     mov [ebx], esi
+    ; edx = 本字段读取到的数字字符数
     mov edx, edi
     ret
 CsvReadNumber ENDP
@@ -496,6 +513,7 @@ parse_after_skip:
     cmp al, 049h
     je parse_bad_line
 
+    ; idDest = OrderIdStorage + rowCount * ORDER_ID_LEN
     mov eax, edi
     mov ebx, ORDER_ID_LEN
     mul ebx
@@ -540,6 +558,7 @@ csv_prio_ok:
     mov [OrderPriority+edi], al
 
     mov ebx, edi
+    ; needBase = rowCount * RES_COUNT = rowCount * 3
     lea ebx, [ebx+ebx*2]
     mov needBase, ebx
 

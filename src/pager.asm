@@ -50,12 +50,14 @@ DrawBuffer PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD, btm:DW
     LOCAL rc:RECT
 
     invoke DrawPanel, hdc, lft, tp, rgt, btm, ADDR BufferText
+    ; 网格左上角：gridL = lft + 24，gridT = tp + 42
     mov eax, lft
     add eax, 24
     mov gridL, eax
     mov eax, tp
     add eax, 42
     mov gridT, eax
+    ; cell = max((btm - gridT - 38) / 4, 34)
     mov eax, btm
     sub eax, gridT
     sub eax, 38
@@ -71,14 +73,17 @@ have_cell:
 row_loop:
     mov col, 0
 col_loop:
+    ; x1 = gridL + col * cell
     mov eax, col
     mul cell
     add eax, gridL
     mov x1, eax
+    ; y1 = gridT + row * cell
     mov eax, row
     mul cell
     add eax, gridT
     mov y1, eax
+    ; x2 = x1 + cell - 4，y2 = y1 + cell - 4
     mov eax, x1
     add eax, cell
     sub eax, 4
@@ -88,6 +93,7 @@ col_loop:
     sub eax, 4
     mov y2, eax
 
+    ; 交错底色下标 = idx & 1
     mov eax, idx
     and eax, 1
     .if eax == 0
@@ -103,6 +109,7 @@ col_loop:
     mov eax, idx
     cmp eax, QueueCount
     jae frame_empty
+    ; queueIndex = (QueueHead + idx) & (QUEUE_SIZE - 1)
     mov ebx, QueueHead
     add ebx, eax
     and ebx, QUEUE_SIZE - 1
@@ -125,12 +132,14 @@ frame_label_done:
     cmp row, 4
     jl row_loop
 
+    ; 右侧文字区域：left = lft + 260，right = rgt - 14
     mov eax, lft
     add eax, 260
     mov x1, eax
     mov eax, rgt
     sub eax, 14
     mov x2, eax
+    ; 第一行 y1 = tp + 58，每行高度 = 24
     mov eax, tp
     add eax, 58
     mov y1, eax
@@ -141,6 +150,7 @@ frame_label_done:
     mov eax, y2
     add eax, 18
     mov y1, eax
+    ; y2 = y1 + 24
     mov eax, y1
     add eax, 24
     mov y2, eax
@@ -186,6 +196,7 @@ AccessOrderPage PROC USES ebx esi edi orderIndex:DWORD
     LOCAL victim:DWORD
     LOCAL minAge:DWORD
 
+    ; pageId = (orderIndex * 7 + SimClock) & 31
     mov eax, orderIndex
     mov ebx, 7
     mul ebx
@@ -217,6 +228,7 @@ fifo_free:
     jmp fifo_free
 fifo_replace:
     mov esi, FifoCursor
+    ; FifoCursor = (FifoCursor + 1) & (CACHE_SIZE - 1)
     mov eax, FifoCursor
     inc eax
     and eax, CACHE_SIZE - 1
@@ -238,6 +250,7 @@ lru_find:
     jmp lru_find
 lru_hit:
     inc LruHits
+    ; LruAge[esi] = LruClock
     mov eax, LruClock
     mov [LruAge+esi*4], eax
     ret
@@ -260,6 +273,7 @@ lru_pick_victim:
 lru_victim_loop:
     cmp edi, CACHE_SIZE
     jae lru_victim_done
+    ; minAge = min(minAge, LruAge[edi])
     mov eax, [LruAge+edi*4]
     cmp eax, minAge
     jae lru_victim_next
@@ -271,6 +285,7 @@ lru_victim_next:
 lru_victim_done:
     mov esi, victim
 lru_store:
+    ; LruFrames[esi] = pageId，LruAge[esi] = LruClock
     mov eax, pageId
     mov [LruFrames+esi], al
     mov eax, LruClock

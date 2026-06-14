@@ -41,8 +41,10 @@ TryAdmitOrder PROC USES ebx esi edi orderIndex:DWORD
     movzx eax, BYTE PTR [OrderState+esi]
     mov prevState, eax
     mov ebx, esi
+    ; ebx = orderIndex * RES_COUNT = orderIndex * 3
     lea ebx, [ebx+ebx*2]
 
+    ; 若任一资源 Need[i] > ResAvail[i]，则不能接纳
     mov al, [OrderNeed+ebx]
     cmp al, [ResAvail]
     ja deny_admit
@@ -53,6 +55,7 @@ TryAdmitOrder PROC USES ebx esi edi orderIndex:DWORD
     cmp al, [ResAvail+2]
     ja deny_admit
 
+    ; 试分配：ResAvail[i] -= Need[i]，OrderAlloc[i] = Need[i]
     mov al, [OrderNeed+ebx]
     sub [ResAvail], al
     mov [OrderAlloc+ebx], al
@@ -68,6 +71,7 @@ TryAdmitOrder PROC USES ebx esi edi orderIndex:DWORD
     cmp eax, 1
     je safe_admit
 
+    ; 回滚试分配：ResAvail[i] += OrderAlloc[i]，OrderAlloc[i] = 0
     mov al, [OrderAlloc+ebx]
     add [ResAvail], al
     mov BYTE PTR [OrderAlloc+ebx], 0
@@ -155,7 +159,9 @@ safe_each:
     .endif
 
     mov ebx, esi
+    ; ebx = esi * RES_COUNT = esi * 3
     lea ebx, [ebx+ebx*2]
+    ; remainNeed[i] = OrderNeed[i] - OrderAlloc[i]，必须 <= work[i]
     movzx eax, BYTE PTR [OrderNeed+ebx]
     movzx edx, BYTE PTR [OrderAlloc+ebx]
     sub eax, edx
@@ -172,6 +178,7 @@ safe_each:
     cmp eax, work2
     ja cannot_finish
 
+    ; 该订单可完成：work[i] += OrderAlloc[i]
     movzx eax, BYTE PTR [OrderAlloc+ebx]
     add work0, eax
     movzx eax, BYTE PTR [OrderAlloc+ebx+1]
@@ -227,7 +234,9 @@ BankerSafe ENDP
 ReleaseOrder PROC USES ebx esi orderIndex:DWORD
     mov esi, orderIndex
     mov ebx, esi
+    ; ebx = orderIndex * RES_COUNT = orderIndex * 3
     lea ebx, [ebx+ebx*2]
+    ; 释放资源：ResAvail[i] += OrderAlloc[i]，OrderAlloc[i] = 0
     mov al, [OrderAlloc+ebx]
     add [ResAvail], al
     mov BYTE PTR [OrderAlloc+ebx], 0

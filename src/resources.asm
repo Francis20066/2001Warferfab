@@ -47,6 +47,7 @@ DrawResourceTable PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD,
     LOCAL y2:DWORD
 
     invoke DrawPanel, hdc, lft, tp, rgt, btm, ADDR ResListText
+    ; 表格区域 = (lft + 10, tp + 36, rgt - 10, btm - 10)
     mov eax, lft
     add eax, 10
     mov gx1, eax
@@ -60,12 +61,14 @@ DrawResourceTable PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD,
     sub eax, 10
     mov gy2, eax
     invoke DrawGrid, hdc, gx1, gy1, gx2, gy2, 5, 4
+    ; cw = (gx2 - gx1) / 5
     mov eax, gx2
     sub eax, gx1
     xor edx, edx
     mov ebx, 5
     div ebx
     mov cw, eax
+    ; rh = (gy2 - gy1) / 4
     mov eax, gy2
     sub eax, gy1
     xor edx, edx
@@ -74,6 +77,7 @@ DrawResourceTable PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD,
     mov rh, eax
 
     m2m y1, gy1
+    ; 表头 y2 = gy1 + rh；每列 x2 = x1 + cw
     mov eax, gy1
     add eax, rh
     mov y2, eax
@@ -105,6 +109,7 @@ DrawResourceTable PROC USES ebx esi edi hdc:HDC, lft:DWORD, tp:DWORD, rgt:DWORD,
 res_row_loop:
     cmp esi, RES_COUNT
     jae res_rows_done
+    ; 第 esi 个资源行：y1 = gy1 + (esi + 1) * rh，y2 = y1 + rh
     mov eax, esi
     inc eax
     mul rh
@@ -134,6 +139,7 @@ res_row_loop:
     mov x2, eax
     movzx eax, BYTE PTR [ResTotal+esi]
     movzx ebx, BYTE PTR [ResAvail+esi]
+    ; 已分配量 = ResTotal[esi] - ResAvail[esi]
     sub eax, ebx
     invoke wsprintfA, ADDR NumBuffer, ADDR FmtNum, eax
     invoke DrawCellA, hdc, ADDR NumBuffer, x1, y1, x2, y2
